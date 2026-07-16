@@ -13,7 +13,7 @@ GROUP_ID = int(os.getenv("GROUP_ID", "0"))
 
 # Manual Fallback Details (defaults for DB settings setup)
 UPI_ID = os.getenv("UPI_ID", "agpriyanshu21@fam")
-QR_FILE_ID = os.getenv("QR_FILE_ID", "YAHAN_APNA_FILE_ID_PASTE_KARO")
+
 
 # Razorpay Credentials (defaults)
 RZP_KEY_ID = os.getenv("RZP_KEY_ID", "rzp_live_SunwtsWUJuxPoe")
