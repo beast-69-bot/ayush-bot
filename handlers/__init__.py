@@ -16,7 +16,8 @@ from handlers.callbacks import (
     generic_done_callback, generic_ban_callback, generic_reply_callback,
     settings_main_callback, admin_orders_menu_callback, admin_view_order_callback,
     admin_revenue_menu_callback, admin_broadcast_menu_callback, broadcast_confirm_callback,
-    back_admin_main_callback, admin_close_callback, admin_action_callback
+    back_admin_main_callback, admin_close_callback, admin_action_callback,
+    pay_donation_type_callback, back_plans_callback
 )
 from handlers.messages import handle_incoming_messages
 
@@ -58,6 +59,10 @@ def register_all_handlers(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(back_admin_main_callback, pattern=r"^back_admin_main$"))
     app.add_handler(CallbackQueryHandler(admin_close_callback, pattern=r"^admin_close$"))
     app.add_handler(CallbackQueryHandler(admin_action_callback, pattern=r"^admin_action:"))
+    
+    # Donation test handlers
+    app.add_handler(CallbackQueryHandler(pay_donation_type_callback, pattern=r"^payplandontype:"))
+    app.add_handler(CallbackQueryHandler(back_plans_callback, pattern=r"^back_plans$"))
     
     # Generic admin action callbacks
     app.add_handler(CallbackQueryHandler(generic_done_callback, pattern=r"^done:"))

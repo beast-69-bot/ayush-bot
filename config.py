@@ -52,5 +52,14 @@ PAY_PLANS = {
         "stars": 25,
         "sub_type": "faphouse",
         "chat_id": GROUP_ID
+    },
+    "donation": {
+        "label": "Test Donation (₹1 / 1 Star)",
+        "days": 0,
+        "amount": 1,
+        "stars": 1,
+        "sub_type": "donation",
+        "chat_id": None
     }
 }
+
