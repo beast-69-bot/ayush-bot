@@ -39,8 +39,10 @@ async def _activate_payment_plan(db: Database, req: dict, bot, context: ContextT
     user_id = int(req["user_id"])
     
     if plan_key == 'getpin':
-        if context:
-            context.user_data["awaiting_getpin_ss"] = True
+        if context and context.application and context.application.user_data is not None:
+            if user_id not in context.application.user_data:
+                context.application.user_data[user_id] = {}
+            context.application.user_data[user_id]["awaiting_getpin_ss"] = True
         
         ss_request_msg = (
             "🚫 <b>No Getpin (1 Month)</b>\n\n"
