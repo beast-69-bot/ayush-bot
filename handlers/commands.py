@@ -91,6 +91,9 @@ async def plan_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, message_
         # Add buttons for each plan
         keyboard.append([InlineKeyboardButton(f"✅ {plan['label']} (₹{plan['amount']})", callback_data=f"payplan:{plan_key}")])
         
+    # Add back to main menu button
+    keyboard.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")])
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     chat_id = update.effective_chat.id

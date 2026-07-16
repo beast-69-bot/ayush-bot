@@ -303,7 +303,7 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         ])
         
     keyboard.append([
-        InlineKeyboardButton("🔙 Back to Plans", callback_data="back_plans")
+        InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_plans")
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1367,7 +1367,7 @@ async def back_plans_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     q = update.callback_query
     await q.answer()
     
-    from handlers.commands import plan_menu
-    await plan_menu(update, context, message_id=q.message.message_id)
+    from handlers.commands import show_main_menu
+    await show_main_menu(update, context, message_id=q.message.message_id)
 
 
