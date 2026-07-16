@@ -32,12 +32,32 @@ def _upi_qr_image_url(upi_uri: str) -> str:
     return f"https://api.qrserver.com/v1/create-qr-code/?size=700x700&data={quote(upi_uri, safe='')}"
 
 # Activate plan helper
-async def _activate_payment_plan(db: Database, req: dict, bot) -> int:
+async def _activate_payment_plan(db: Database, req: dict, bot, context: ContextTypes.DEFAULT_TYPE = None) -> int:
     plan_key = str(req.get("plan_key") or "")
     plan = config.PAY_PLANS.get(plan_key, {})
     days = int(req.get("plan_days") or 30)
     user_id = int(req["user_id"])
     
+    if plan_key == 'getpin':
+        if context:
+            context.user_data["awaiting_getpin_ss"] = True
+        
+        ss_request_msg = (
+            "🚫 <b>No Getpin (1 Month)</b>\n\n"
+            "Remove getpin for 1 month for any ONE Apk.\n\n"
+            "⚠️ After payment, open the apk, go to the getpin page, take a screenshot, and send it here."
+        )
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👨‍💼 Contact Admin", url="https://t.me/Mgayushff")]
+        ])
+        await bot.send_message(
+            chat_id=user_id,
+            text=ss_request_msg,
+            reply_markup=kb,
+            parse_mode='HTML'
+        )
+        return 0
+        
     # Calculate and extend subscription
     until = await db.add_premium_seconds(user_id, days * 24 * 60 * 60)
     
@@ -65,12 +85,6 @@ async def _activate_payment_plan(db: Database, req: dict, bot) -> int:
                 chat_id=user_id,
                 text="🎉 Premium Activated! Group join links generation failed. Please contact admin to get access."
             )
-    elif plan_key == 'getpin':
-        await bot.send_message(
-            chat_id=user_id,
-            text="✅ <b>Payment Verified!</b>\n\nAb apne app me jao jisme getpin hatana hai, aur <b>getpin wale page ka screenshot</b> yahan bhejo.",
-            parse_mode='HTML'
-        )
     
     return until
 
@@ -189,7 +203,42 @@ async def _poll_razorpay_and_complete(
         if not ok:
             return
             
-        until = await _activate_payment_plan(db, req, context.bot)
+        until = await _activate_payment_plan(db, req, context.bot, context)
+        
+        if req['plan_key'] == 'getpin':
+            await _delete_payment_qr_message(req, context)
+            
+            # Notify admins
+            admin_ids = await db.list_admin_ids()
+            targets = {config.OWNER_ID, *admin_ids}
+            admin_note = (
+                "🚀 <b>Razorpay Auto-Verified (Getpin Plan)</b>\n\n"
+                f"Order ID: <code>#{req['id']}</code>\n"
+                f"User ID: <code>{req['user_id']}</code>\n"
+                f"Plan: <b>{req['plan_key']}</b> ({req['plan_days']} days)\n"
+                f"Amount: ₹{req['amount_rs']}\n"
+                "Status: <b>Verified (Awaiting User Screenshot)</b>"
+            )
+            for aid in targets:
+                if aid:
+                    try:
+                        await context.bot.send_message(chat_id=aid, text=admin_note, parse_mode="HTML")
+                    except Exception:
+                        pass
+                        
+            # Update user status card
+            await _update_payment_user_status(
+                req,
+                context,
+                "Payment Status: SUCCESS",
+                [
+                    "Your payment has been auto-verified via Razorpay!",
+                    "Please open the apk, go to the getpin page, take a screenshot, and send it here."
+                ]
+            )
+            await db.clear_payment_ui_messages(int(req["id"]))
+            return
+
         expiry_utc = datetime.datetime.utcfromtimestamp(until).strftime("%Y-%m-%d %H:%M:%S UTC")
         
         await _delete_payment_qr_message(req, context)
@@ -411,7 +460,33 @@ async def pay_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await q.answer("Already handled", show_alert=True)
             return
             
-        until = await _activate_payment_plan(db, req, context.bot)
+        until = await _activate_payment_plan(db, req, context.bot, context)
+        
+        if req['plan_key'] == 'getpin':
+            await q.edit_message_text(
+                text=(
+                    f"✅ <b>Payment Approved (Getpin Plan)</b>\n\n"
+                    f"Request ID: #{rid}\n"
+                    f"User ID: {req['user_id']}\n"
+                    f"Approved By: {admin_name}\n"
+                    f"Status: <b>Awaiting User Screenshot</b>"
+                ),
+                parse_mode="HTML"
+            )
+            await _delete_payment_qr_message(req, context)
+            await _update_payment_user_status(
+                req,
+                context,
+                "Payment Approved",
+                [
+                    "Status: <b>Approved (Awaiting Screenshot)</b>",
+                    f"Approved By: <code>{admin_name}</code>",
+                    "Please open the apk, go to the getpin page, take a screenshot, and send it here."
+                ]
+            )
+            await db.clear_payment_ui_messages(rid)
+            return
+
         expiry_utc = datetime.datetime.utcfromtimestamp(until).strftime("%Y-%m-%d %H:%M:%S UTC")
         
         try:
@@ -691,7 +766,38 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
         print(f"Failed to approve payment request {rid} in database")
         return
         
-    until = await _activate_payment_plan(db, req, context.bot)
+    until = await _activate_payment_plan(db, req, context.bot, context)
+    
+    if req['plan_key'] == 'getpin':
+        admin_ids = await db.list_admin_ids()
+        targets = {config.OWNER_ID, *admin_ids}
+        admin_note = (
+            "🚀 <b>Telegram Stars Payment Auto-Verified (Getpin Plan)</b>\n\n"
+            f"Order ID: <code>#{req['id']}</code>\n"
+            f"User ID: <code>{req['user_id']}</code>\n"
+            f"Plan: <b>{req['plan_key']}</b> ({req['plan_days']} days)\n"
+            f"Amount: {payment.total_amount} Stars ⭐\n"
+            "Status: <b>Verified (Awaiting User Screenshot)</b>"
+        )
+        for aid in targets:
+            if aid:
+                try:
+                    await context.bot.send_message(chat_id=aid, text=admin_note, parse_mode="HTML")
+                except Exception:
+                    pass
+                    
+        await _update_payment_user_status(
+            req,
+            context,
+            "Payment Status: SUCCESS",
+            [
+                "This order's payment has been verified via Telegram Stars.",
+                "Please open the apk, go to the getpin page, take a screenshot, and send it here."
+            ]
+        )
+        await db.clear_payment_ui_messages(rid)
+        return
+
     expiry_utc = datetime.datetime.utcfromtimestamp(until).strftime("%Y-%m-%d %H:%M:%S UTC")
     
     # Update admin message/status
@@ -757,15 +863,26 @@ async def generic_done_callback(update: Update, context: ContextTypes.DEFAULT_TY
     
     data = q.data or ""
     target_uid = int(data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
     try:
+        # Activate 1-month premium subscription (30 days)
+        until = await db.add_premium_seconds(target_uid, 30 * 24 * 60 * 60)
+        expiry_utc = datetime.datetime.utcfromtimestamp(until).strftime("%Y-%m-%d %H:%M:%S UTC")
+        
         await context.bot.send_message(
             chat_id=target_uid,
-            text="✅ <b>Order Completed!</b>\n\nAapka getpin order successfully complete aur activate ho gaya hai.",
+            text=(
+                "🎉 <b>Aapka No Getpin plan active ho chuka hai!</b>\n\n"
+                "🎟 Plan: <b>No Getpin (1 Month)</b>\n"
+                "📅 Duration: 30 Days\n"
+                f"🕒 Expires: <code>{expiry_utc}</code>\n\n"
+                "Aapka getpin order successfully complete aur activate ho gaya hai."
+            ),
             parse_mode="HTML"
         )
         await q.edit_message_caption("✅ Order Completed!")
     except Exception as e:
-        await q.answer(f"Failed to notify user: {e}", show_alert=True)
+        await q.answer(f"Failed to process completion: {e}", show_alert=True)
 
 async def generic_ban_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query

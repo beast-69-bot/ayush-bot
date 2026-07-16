@@ -37,11 +37,28 @@ async def check_expiry(context: ContextTypes.DEFAULT_TYPE) -> None:
             # Reset user's premium status in database
             await db.set_premium_until(user_id, 0)
             
+            # Check if user's last plan was getpin
+            is_getpin = False
+            try:
+                async with db.conn.execute(
+                    "SELECT plan_key FROM payment_requests WHERE user_id=? AND status='processed' ORDER BY processed_at DESC LIMIT 1",
+                    (user_id,)
+                ) as p_cursor:
+                    p_row = await p_cursor.fetchone()
+                    if p_row and p_row[0] == 'getpin':
+                        is_getpin = True
+            except Exception as e:
+                logger.error(f"Failed to query last plan type for user {user_id}: {e}")
+            
             # Notify the user
             try:
+                if is_getpin:
+                    msg = "⏰ Aapka No Getpin (1 Month) plan end ho gaya hai. Dobara access ke liye /plan dabayein."
+                else:
+                    msg = "⏰ Aapka premium plan khatam ho gaya. Dobara access ke liye /plan dabayein."
                 await context.bot.send_message(
                     chat_id=user_id,
-                    text="⏰ Aapka premium plan khatam ho gaya. Dobara access ke liye /plan dabayein."
+                    text=msg
                 )
             except Exception:
                 pass

@@ -334,10 +334,13 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
             admin_ids = await db.list_admin_ids()
             targets = {config.OWNER_ID, *admin_ids}
             
+            user_data = await db.get_user(user_id)
+            contact_url = f"https://t.me/{user_data['username']}" if user_data and user_data.get('username') else f"tg://user?id={user_id}"
+            
             kb = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✅ Order Completed", callback_data=f"done:{user_id}"),
-                    InlineKeyboardButton("🚫 Ban User", callback_data=f"ban:{user_id}")
+                    InlineKeyboardButton("💬 Contact User", url=contact_url),
+                    InlineKeyboardButton("✅ Order Completed", callback_data=f"done:{user_id}")
                 ]
             ])
             
@@ -356,7 +359,8 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
                     except Exception:
                         pass
                         
-            await update.effective_message.reply_text("✅ Screenshot mil gayi! Admin verify karke jald hi order complete karenge.")
+            await update.effective_message.reply_text("done")
+            await update.effective_message.reply_text("Wait kro, apka plan 1 mahine ka kuch der me active hojayega")
         else:
-            await update.effective_message.reply_text("⚠️ Please send the getpin page screenshot as a photo.")
+            await update.effective_message.reply_text("diya gya photo bheje")
         return
