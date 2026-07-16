@@ -1386,6 +1386,10 @@ async def admin_withdraw_menu_callback(update: Update, context: ContextTypes.DEF
     q = update.callback_query
     await q.answer()
     
+    # Clear any awaiting withdrawal status if user cancels/goes back
+    context.user_data.pop("awaiting_withdraw_amount", None)
+    context.user_data.pop("withdraw_menu_msg_id", None)
+    
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     if not await db.is_admin(user_id):

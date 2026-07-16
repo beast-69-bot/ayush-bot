@@ -70,7 +70,12 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
         txt = (update.effective_message.text or "").strip()
         if txt.lower() == "cancel":
             context.user_data.pop("awaiting_withdraw_amount", None)
-            context.user_data.pop("withdraw_menu_msg_id", None)
+            menu_msg_id = context.user_data.pop("withdraw_menu_msg_id", None)
+            if menu_msg_id:
+                try:
+                    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=menu_msg_id)
+                except Exception:
+                    pass
             await update.effective_message.reply_text("❌ Withdrawal request cancelled.")
             from handlers.commands import show_admin_menu
             await show_admin_menu(update, context)
@@ -112,7 +117,12 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
             return
             
         context.user_data.pop("awaiting_withdraw_amount", None)
-        context.user_data.pop("withdraw_menu_msg_id", None)
+        menu_msg_id = context.user_data.pop("withdraw_menu_msg_id", None)
+        if menu_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=menu_msg_id)
+            except Exception:
+                pass
         
         # Save request to database
         wid = await db.create_withdrawal_request(user_id, amount)
