@@ -19,6 +19,49 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
     if await db.is_bot_banned(user_id):
         return
 
+    # 1b. Admin Broadcast Handler
+    if context.user_data.get("awaiting_broadcast"):
+        if not await db.is_admin(user_id):
+            return
+            
+        txt = update.effective_message.text or ""
+        if txt.strip().lower() == "cancel":
+            context.user_data.pop("awaiting_broadcast", None)
+            context.user_data.pop("broadcast_menu_msg_id", None)
+            await update.effective_message.reply_text("❌ Broadcast cancelled.")
+            from handlers.commands import show_admin_menu
+            await show_admin_menu(update, context)
+            return
+            
+        # Copy the message back as preview to the admin
+        try:
+            preview_msg = await context.bot.copy_message(
+                chat_id=update.effective_chat.id,
+                from_chat_id=update.effective_chat.id,
+                message_id=update.effective_message.message_id
+            )
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ Failed to generate preview: {e}")
+            return
+            
+        context.user_data["broadcast_template_msg_id"] = update.effective_message.message_id
+        context.user_data["broadcast_template_chat_id"] = update.effective_chat.id
+        
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🚀 Start Broadcast", callback_data="broadcast_confirm:send"),
+                InlineKeyboardButton("❌ Cancel", callback_data="broadcast_confirm:cancel")
+            ]
+        ])
+        
+        await update.effective_message.reply_text(
+            "☝️ <b>This is a preview of your broadcast message.</b>\n\n"
+            "Confirm if you want to send this to all users:",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        return
+
     # 2. Admin Settings Field Modification
     edit_field = context.user_data.get("settings_edit_field")
     if edit_field:

@@ -518,3 +518,75 @@ class Database:
                 }
             )
         return out
+
+    async def list_all_user_ids(self) -> list[int]:
+        cur = await self.conn.execute("SELECT user_id FROM users")
+        rows = await cur.fetchall()
+        await cur.close()
+        return [row[0] for row in rows]
+
+    async def list_recent_payment_requests(self, limit: int = 10) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT id, user_id, plan_key, plan_days, amount_rs, status, created_at
+            FROM payment_requests
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = await cur.fetchall()
+        await cur.close()
+        out = []
+        for r in rows:
+            out.append({
+                "id": int(r[0]),
+                "user_id": int(r[1]),
+                "plan_key": r[2],
+                "plan_days": int(r[3]),
+                "amount_rs": int(r[4]),
+                "status": r[5],
+                "created_at": int(r[6]),
+            })
+        return out
+
+    async def get_payment_stats(self) -> dict[str, int]:
+        cur = await self.conn.execute(
+            """
+            SELECT status, COUNT(*)
+            FROM payment_requests
+            GROUP BY status
+            """
+        )
+        rows = await cur.fetchall()
+        await cur.close()
+        stats = {"pending": 0, "submitted": 0, "processed": 0, "rejected": 0, "expired": 0}
+        for row in rows:
+            status = row[0]
+            if status in stats:
+                stats[status] = row[1]
+        return stats
+
+    async def list_all_processed_payments(self) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT id, user_id, plan_key, amount_rs, processed_by, processed_at, gateway_extra
+            FROM payment_requests
+            WHERE status='processed'
+            """
+        )
+        rows = await cur.fetchall()
+        await cur.close()
+        out = []
+        for r in rows:
+            out.append({
+                "id": int(r[0]),
+                "user_id": int(r[1]),
+                "plan_key": r[2],
+                "amount_rs": int(r[3]),
+                "processed_by": r[4],
+                "processed_at": r[5],
+                "gateway_extra": r[6],
+            })
+        return out
+

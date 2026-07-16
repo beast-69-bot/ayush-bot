@@ -331,6 +331,8 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
             
             await db.set_payment_ui_messages(rid, update.effective_chat.id, sent_msg.message_id, None)
+            gateway_data = {"gateway": "stars"}
+            await db.set_payment_gateway_extra(rid, json.dumps(gateway_data))
             
         except Exception as e:
             print(f"Stars invoice error: {e}")
@@ -484,6 +486,8 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
             
             await db.set_payment_ui_messages(rid, update.effective_chat.id, status_msg.message_id, qr_msg.message_id)
+            gateway_data = {"gateway": "manual"}
+            await db.set_payment_gateway_extra(rid, json.dumps(gateway_data))
         except Exception as e:
             print(f"Manual payment QR error: {e}")
             await context.bot.send_message(
@@ -946,9 +950,342 @@ async def generic_reply_callback(update: Update, context: ContextTypes.DEFAULT_T
     data = q.data or ""
     target_uid = int(data.split(":")[1])
     
-    context.user_data["admin_reply_target"] = target_uid
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"💬 Reply enter karein jo user <code>{target_uid}</code> ko jayega:",
         parse_mode="HTML"
     )
+
+async def settings_main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    await settings_menu(update, context, message_id=q.message.message_id)
+
+async def admin_orders_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    stats = await db.get_payment_stats()
+    recent = await db.list_recent_payment_requests(limit=5)
+    
+    # Format stats
+    text = (
+        "📦 <b>Orders Details & Statistics</b>\n\n"
+        f"✅ Processed: <code>{stats.get('processed', 0)}</code>\n"
+        f"⏳ Pending: <code>{stats.get('pending', 0)}</code>\n"
+        f"🎟 Submitted: <code>{stats.get('submitted', 0)}</code>\n"
+        f"❌ Rejected: <code>{stats.get('rejected', 0)}</code>\n"
+        f"⏰ Expired: <code>{stats.get('expired', 0)}</code>\n\n"
+        "👇 <b>Recent Orders (Last 5):</b>"
+    )
+    
+    keyboard = []
+    for r in recent:
+        plan = config.PAY_PLANS.get(r['plan_key'], {"label": r['plan_key']})
+        plan_label = plan.get("label", r['plan_key'])
+        status_emoji = {
+            "processed": "✅",
+            "pending": "⏳",
+            "submitted": "🎟",
+            "rejected": "❌",
+            "expired": "⏰"
+        }.get(r['status'], "❓")
+        
+        keyboard.append([
+            InlineKeyboardButton(
+                f"#{r['id']} | {plan_label} | {status_emoji} {r['status'].upper()} (₹{r['amount_rs']})",
+                callback_data=f"admin_view_order:{r['id']}"
+            )
+        ])
+        
+    # Actions & Back
+    keyboard.append([
+        InlineKeyboardButton("🔍 Lookup Order By ID", callback_data="admin_action:lookup")
+    ])
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back to Admin Menu", callback_data="back_admin_main")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def admin_view_order_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    data = q.data or ""
+    rid = int(data.split(":")[1])
+    req = await db.get_payment_request(rid)
+    
+    if not req:
+        await q.answer("Order not found", show_alert=True)
+        return
+        
+    created_str = datetime.datetime.utcfromtimestamp(req['created_at']).strftime('%Y-%m-%d %H:%M:%S UTC')
+    updated_str = datetime.datetime.utcfromtimestamp(req['updated_at']).strftime('%Y-%m-%d %H:%M:%S UTC')
+    
+    text = (
+        f"🔍 <b>Order #{rid} Details</b>\n\n"
+        f"👤 <b>User ID:</b> <code>{req['user_id']}</code>\n"
+        f"🎟 <b>Plan Key:</b> <code>{req['plan_key']}</code> ({req['plan_days']} days)\n"
+        f"💰 <b>Amount:</b> ₹{req['amount_rs']}\n"
+        f"⚙️ <b>Status:</b> <code>{req['status'].upper()}</code>\n"
+        f"📝 <b>UTR submitted:</b> <code>{req['utr_text'] or 'None'}</code>\n"
+        f"📅 <b>Created At:</b> <code>{created_str}</code>\n"
+        f"📅 <b>Updated At:</b> <code>{updated_str}</code>\n"
+    )
+    if req['processed_by']:
+        text += f"👮 <b>Processed By:</b> <code>{req['processed_by']}</code>\n"
+        
+    keyboard = []
+    if req['status'] in ('pending', 'submitted'):
+        keyboard.append([
+            InlineKeyboardButton("✅ Approve", callback_data=f"payadm:approve:{rid}"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"payadm:reject:{rid}")
+        ])
+        
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back to Orders List", callback_data="admin_orders_menu")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def admin_revenue_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    payments = await db.list_all_processed_payments()
+    
+    total_rs = 0
+    total_stars = 0
+    
+    # Gateways
+    gw_razorpay = 0
+    gw_stars = 0
+    gw_manual = 0
+    
+    # Plans
+    plan_revenue = {}
+    for plan_key in config.PAY_PLANS.keys():
+        plan_revenue[plan_key] = 0
+        
+    for p in payments:
+        # Determine gateway
+        gw = "manual"
+        gw_extra_str = p.get("gateway_extra")
+        if gw_extra_str:
+            try:
+                gw_extra = json.loads(gw_extra_str)
+                gw = gw_extra.get("gateway", "manual")
+            except Exception:
+                if "razorpay" in gw_extra_str.lower():
+                    gw = "razorpay"
+                elif "stars" in gw_extra_str.lower():
+                    gw = "stars"
+        else:
+            # Fallback for old orders
+            if p.get("processed_by") == 0:
+                gw = "stars"
+            else:
+                gw = "manual"
+                
+        amount = p.get("amount_rs", 0)
+        
+        if gw == "stars":
+            gw_stars += amount
+            total_stars += amount
+        elif gw == "razorpay":
+            gw_razorpay += amount
+            total_rs += amount
+        else:
+            gw_manual += amount
+            total_rs += amount
+            
+        plan_key = p.get("plan_key")
+        if plan_key in plan_revenue:
+            plan_revenue[plan_key] += amount
+        else:
+            plan_revenue[plan_key] = amount
+            
+    text = (
+        "📊 <b>Elite Premium Store - Complete Revenue Report</b>\n\n"
+        f"💰 <b>Total Earnings (Fiat):</b> ₹{total_rs}\n"
+        f"⭐ <b>Total Earnings (Stars):</b> {total_stars} Stars\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🔌 <b>Revenue by Payment Flow:</b>\n"
+        f"• 💳 Manual UPI: ₹{gw_manual}\n"
+        f"• ⚡ Razorpay Gateway: ₹{gw_razorpay}\n"
+        f"• ⭐ Telegram Stars: {gw_stars} Stars\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📦 <b>Revenue by Individual Plan (Total):</b>\n"
+    )
+    
+    for pk, rev in plan_revenue.items():
+        plan = config.PAY_PLANS.get(pk, {"label": pk})
+        label = plan.get("label", pk)
+        text += f"• {label}: ₹{rev}\n"
+        
+    keyboard = [[
+        InlineKeyboardButton("🔙 Back to Admin Menu", callback_data="back_admin_main")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def admin_broadcast_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    context.user_data["awaiting_broadcast"] = True
+    context.user_data["broadcast_menu_msg_id"] = q.message.message_id
+    
+    text = (
+        "📢 <b>Broadcast Message Feature</b>\n\n"
+        "Aap jo message sabhi users ko bhejna chahte hain use niche type karein ya send karein.\n\n"
+        "• Aap text, image, document, custom formatting, emojis aadi kuch bhi bhej sakte hain.\n"
+        "• Cancel karne ke liye type karein: <code>cancel</code>"
+    )
+    
+    keyboard = [[
+        InlineKeyboardButton("❌ Cancel & Go Back", callback_data="back_admin_main")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def broadcast_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    data = q.data or ""
+    action = data.split(":")[1]
+    
+    template_msg_id = context.user_data.pop("broadcast_template_msg_id", None)
+    template_chat_id = context.user_data.pop("broadcast_template_chat_id", None)
+    context.user_data.pop("awaiting_broadcast", None)
+    
+    if action == "cancel":
+        await q.edit_message_text("❌ Broadcast cancelled.")
+        from handlers.commands import show_admin_menu
+        await show_admin_menu(update, context)
+        return
+        
+    if not template_msg_id or not template_chat_id:
+        await q.edit_message_text("❌ Error: Broadcast template message not found. Please try again.")
+        return
+        
+    await q.edit_message_text("🚀 <b>Broadcasting message to all users...</b> Please wait.", parse_mode="HTML")
+    
+    user_ids = await db.list_all_user_ids()
+    
+    success_count = 0
+    fail_count = 0
+    
+    import asyncio
+    for uid in user_ids:
+        try:
+            await context.bot.copy_message(
+                chat_id=uid,
+                from_chat_id=template_chat_id,
+                message_id=template_msg_id
+            )
+            success_count += 1
+        except Exception:
+            fail_count += 1
+        await asyncio.sleep(0.05)
+        
+    text = (
+        "📢 <b>Broadcast Completed!</b>\n\n"
+        f"✅ <b>Sent Successfully:</b> <code>{success_count}</code> users\n"
+        f"❌ <b>Failed:</b> <code>{fail_count}</code> users"
+    )
+    
+    keyboard = [[
+        InlineKeyboardButton("🔙 Back to Admin Menu", callback_data="back_admin_main")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def back_admin_main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    context.user_data.pop("awaiting_broadcast", None)
+    context.user_data.pop("broadcast_template_msg_id", None)
+    context.user_data.pop("broadcast_template_chat_id", None)
+    
+    from handlers.commands import show_admin_menu
+    await show_admin_menu(update, context, message_id=q.message.message_id)
+
+async def admin_close_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    try:
+        await q.message.delete()
+    except Exception:
+        pass
+
+async def admin_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    data = q.data or ""
+    action = data.split(":")[1]
+    
+    if action == "lookup":
+        text = (
+            "🔍 <b>Lookup Order ID</b>\n\n"
+            "Order details dekhne ke liye please direct chat me niche diye format me type/send karein:\n"
+            "<code>/paylookup &lt;order_id&gt;</code>\n\n"
+            "<i>Example: /paylookup 102</i>"
+        )
+    else:
+        return
+        
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Back to Orders List", callback_data="admin_orders_menu")]
+    ])
+    await q.edit_message_text(text=text, reply_markup=kb, parse_mode="HTML")
+

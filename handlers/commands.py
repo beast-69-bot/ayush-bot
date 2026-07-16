@@ -274,3 +274,57 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, mess
 
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await settings_menu(update, context)
+
+async def admin_menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    
+    if not await db.is_admin(user_id):
+        return
+        
+    await show_admin_menu(update, context)
+
+async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, message_id=None) -> None:
+    keyboard = [
+        [
+            InlineKeyboardButton("⚙️ Config Settings", callback_data="settings_main"),
+            InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast_menu")
+        ],
+        [
+            InlineKeyboardButton("📦 Orders Details", callback_data="admin_orders_menu"),
+            InlineKeyboardButton("📊 Revenue Reports", callback_data="admin_revenue_menu")
+        ],
+        [
+            InlineKeyboardButton("❌ Close Menu", callback_data="admin_close")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = (
+        "👑 <b>Elite Premium Store - Admin Control Panel</b>\n\n"
+        "Select an administrative action below:"
+    )
+    chat_id = update.effective_chat.id
+    if message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        except Exception:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+    else:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+
