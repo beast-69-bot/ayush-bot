@@ -288,246 +288,40 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Invalid plan.")
         return
         
-    if plan_key == "donation":
-        keyboard = [
-            [
-                InlineKeyboardButton("💳 Razorpay (₹1)", callback_data="payplandontype:razorpay"),
-                InlineKeyboardButton("⭐ Telegram Stars (1 Star)", callback_data="payplandontype:stars")
-            ],
-            [
-                InlineKeyboardButton("🔙 Back to Plans", callback_data="back_plans")
-            ]
+    keyboard = [
+        [
+            InlineKeyboardButton("⚡ Fast Auto UPI (GPay, Paytm, PhonePe)", callback_data=f"paygwchoice:{plan_key}:razorpay")
+        ],
+        [
+            InlineKeyboardButton("⭐ Fast Stars & Crypto (Telegram Stars)", callback_data=f"paygwchoice:{plan_key}:stars")
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=(
-                "❤️ <b>Test Donation (Razorpay / Stars Testing)</b> ❤️\n\n"
-                "Please choose the payment gateway you want to test:\n\n"
-                "• <b>Razorpay:</b> Generates a dynamic UPI QR code (₹1).\n"
-                "• <b>Telegram Stars:</b> Generates an in-app digital invoice (1 Star).\n\n"
-                "Upon successful payment, a verification thank you message will be sent."
-            ),
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-        return
-        
-    existing = await db.get_latest_open_payment_request(user_id)
-    if existing:
-        await db.expire_payment_request_if_pending(existing["id"])
-        await _delete_payment_qr_message(existing, context)
-        await _update_payment_user_status(
-            existing,
-            context,
-            "Payment Request Replaced",
-            ["Status: <b>Expired</b>", "A newer order was started by the user."]
-        )
-        await db.clear_payment_ui_messages(existing["id"])
-
-    rid = await db.create_payment_request(user_id, plan_key, plan["days"], plan["amount"])
-    gateway = await db.get_setting("payment_gateway") or "manual"
+    ]
     
-    req = await db.get_payment_request(rid)
-    
-    if gateway == "stars":
-        stars_amount = plan.get("stars", plan["amount"])
-        prices = [LabeledPrice(label=plan["label"], amount=stars_amount)]
-        try:
-            invoice_link = await context.bot.create_invoice_link(
-                title=f"Premium - {plan['label']}",
-                description=f"{plan['days']} Days Premium Subscription VIP Access.",
-                payload=str(rid),
-                provider_token="",
-                currency="XTR",
-                prices=prices,
-            )
-            
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⭐ Pay {stars_amount} Stars ⭐", url=invoice_link)],
-                [InlineKeyboardButton("❌ Cancel Order", callback_data=f"paycancel:{rid}")]
-            ])
-            
-            status_text = (
-                "💎 <b>Premium VIP Purchase</b>\n\n"
-                f"🛍 Plan: <b>{plan['label']}</b>\n"
-                f"💰 Price: {stars_amount} Stars ⭐\n"
-                f"⏳ Duration: {plan['days']} Days\n\n"
-                "Tap the button below to complete payment via Telegram Stars."
-            )
-            
-            sent_msg = await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=status_text,
-                reply_markup=kb,
-                parse_mode="HTML"
-            )
-            
-            await db.set_payment_ui_messages(rid, update.effective_chat.id, sent_msg.message_id, None)
-            gateway_data = {"gateway": "stars"}
-            await db.set_payment_gateway_extra(rid, json.dumps(gateway_data))
-            
-        except Exception as e:
-            print(f"Stars invoice error: {e}")
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="⚠️ Failed to generate invoice. Please contact the admin."
-            )
-            
-    elif gateway == "razorpay":
-        key_id = await db.get_setting("razorpay_key_id")
-        key_secret = await db.get_setting("razorpay_key_secret")
-        
-        if not key_id or not key_secret:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="❌ Razorpay credentials are not configured by admin."
-            )
-            return
-            
-        loading_msg = await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="⏳ Generating Razorpay UPI QR Code..."
-        )
-        
-        try:
-            username = update.effective_user.username or f"id_{user_id}"
-            create_res = await razorpay_service.create_qr_code(
-                amount_rs=plan["amount"],
-                order_id=rid,
-                key_id=key_id,
-                key_secret=key_secret,
-                user_id=user_id,
-                username=username,
-                plan_label=plan["label"]
-            )
-            
-            qr_code_id = create_res.get("id")
-            image_url = create_res.get("image_url")
-            
-            if not qr_code_id or not image_url:
-                raise ValueError("No QR code ID or image URL received from Razorpay.")
-                
-            gateway_data = {"qr_code_id": qr_code_id, "image_url": image_url, "gateway": "razorpay"}
-            await db.set_payment_gateway_extra(rid, json.dumps(gateway_data))
-            
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=loading_msg.message_id)
-            
-            caption = (
-                "⚡ <b>RAZORPAY DYNAMIC QR PAYMENT</b> ⚡\n\n"
-                f"💎 <b>Plan:</b> {plan['label']}\n"
-                f"💰 <b>Amount:</b> ₹{plan['amount']}\n"
-                f"🆔 <b>Order ID:</b> <code>#{rid}</code>\n\n"
-                "📲 <b>How to pay:</b>\n"
-                "1️⃣ Scan the QR Code above using any UPI app.\n"
-                "2️⃣ Mobile users: Screenshot the QR and upload it in GPay/PhonePe scanner.\n"
-                "3️⃣ Premium activates automatically once payment is complete!\n\n"
-                "⏳ Complete payment within 5 minutes.\n"
-                "🚀 Activation is automatic — no action needed after payment."
-            )
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel Order", callback_data=f"paycancel:{rid}")]
-            ])
-            
-            qr_msg = await context.bot.send_photo(
-                chat_id=update.effective_chat.id,
-                photo=image_url,
-                caption=caption,
-                reply_markup=kb,
-                parse_mode="HTML"
-            )
-            
-            status_text = (
-                f"<b>Payment Request #{rid} Created</b>\n\n"
-                f"Plan: <b>{plan['label']}</b>\n"
-                f"Amount: ₹{plan['amount']}\n"
-                "Status: <b>Pending</b>\n\n"
-                "Complete the payment using the QR Code above. Your premium will be activated automatically."
-            )
-            status_msg = await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=status_text,
-                parse_mode="HTML"
-            )
-            
-            await db.set_payment_ui_messages(rid, update.effective_chat.id, status_msg.message_id, qr_msg.message_id)
-            
-            import asyncio
-            asyncio.create_task(_poll_razorpay_and_complete(context, rid, qr_code_id, key_id, key_secret))
-            
-        except Exception as e:
-            print(f"Razorpay gateway error: {e}")
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="⚠️ Razorpay gateway error. Please use manual UPI payment or contact admin."
-            )
-            
-    else:
-        upi_id = await db.get_setting("pay_upi")
-        pay_name = await db.get_setting("pay_name") or "Premium Store"
-        pay_text = await db.get_setting("pay_text") or "Scan the QR and pay. Enter UTR to verify."
-        
-        if not upi_id:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="❌ UPI payment is not configured by admin yet. Please contact admin."
-            )
-            return
-            
-        projected_until = req.get("projected_premium_until") or 0
-        note = _manual_payment_note(user_id, rid, plan["days"], projected_until)
-        upi_uri = _upi_uri(upi_id=upi_id, amount_rs=plan["amount"], payee_name=pay_name, note=note)
-        qr_url = _upi_qr_image_url(upi_uri)
-        
-        caption = (
-            "⚡ <b>MANUAL UPI PAYMENT</b> ⚡\n\n"
-            f"💎 <b>Plan:</b> {plan['label']}\n"
-            f"💰 <b>Amount:</b> ₹{plan['amount']}\n"
-            f"🆔 <b>Order ID:</b> <code>#{rid}</code>\n"
-            f"👤 <b>User ID:</b> <code>{user_id}</code>\n\n"
-            f"💳 <b>UPI ID:</b> <code>{upi_id}</code>\n"
-            f"🧾 <b>Payment Note:</b> <code>{note}</code>\n\n"
-            f"📝 <b>Instructions:</b>\n{pay_text}\n\n"
-            "⏳ Valid for 5 minutes only."
-        )
-        
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎟 Submit UTR", callback_data=f"payutr:{rid}")],
-            [InlineKeyboardButton("❌ Cancel Order", callback_data=f"paycancel:{rid}")]
+    if plan_key != "donation":
+        keyboard.append([
+            InlineKeyboardButton("🎟 Manual UPI (UTR Approval)", callback_data=f"paygwchoice:{plan_key}:manual")
         ])
         
-        try:
-            qr_msg = await context.bot.send_photo(
-                chat_id=update.effective_chat.id,
-                photo=qr_url,
-                caption=caption,
-                parse_mode="HTML"
-            )
-            
-            status_text = (
-                f"<b>Payment Request #{rid} Created</b>\n\n"
-                f"Plan: <b>{plan['label']}</b>\n"
-                f"Amount: ₹{plan['amount']}\n"
-                "Status: <b>Pending</b>\n\n"
-                "Scan the QR above to pay. After payment, click **Submit UTR** and enter your transaction ID."
-            )
-            status_msg = await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=status_text,
-                reply_markup=kb,
-                parse_mode="HTML"
-            )
-            
-            await db.set_payment_ui_messages(rid, update.effective_chat.id, status_msg.message_id, qr_msg.message_id)
-            gateway_data = {"gateway": "manual"}
-            await db.set_payment_gateway_extra(rid, json.dumps(gateway_data))
-        except Exception as e:
-            print(f"Manual payment QR error: {e}")
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"QR Code generation failed. Please transfer directly to the UPI ID: <code>{upi_id}</code>\nNote: {note}",
-                parse_mode="HTML"
-            )
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back to Plans", callback_data="back_plans")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    text = (
+        f"🛍 <b>Payment Selection: {plan['label']}</b>\n\n"
+        f"💰 Price: <b>₹{plan['amount']}</b> / <b>{plan.get('stars', plan['amount'])} Stars ⭐</b>\n\n"
+        "Please choose your preferred payment method:\n\n"
+        "⚡ <b>Fast Auto UPI:</b> Generates a dynamic QR code. Scans & auto-approves instantly via Paytm/GPay/PhonePe.\n"
+        "⭐ <b>Fast Stars & Crypto:</b> Pay instantly using Telegram Stars (supports card/crypto/in-app wallets).\n"
+    )
+    if plan_key != "donation":
+        text += "\n🎟 <b>Manual UPI:</b> Send payment to our UPI ID and submit a 12-digit UTR/Screenshot for manual admin approval."
+        
+    try:
+        await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode="HTML")
 
 async def pay_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
@@ -1331,7 +1125,7 @@ async def admin_action_callback(update: Update, context: ContextTypes.DEFAULT_TY
     ])
     await q.edit_message_text(text=text, reply_markup=kb, parse_mode="HTML")
 
-async def pay_donation_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def pay_gw_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
     await q.answer()
     
@@ -1342,11 +1136,19 @@ async def pay_donation_type_callback(update: Update, context: ContextTypes.DEFAU
         return
         
     data = q.data or ""
-    gw_choice = data.split(":")[1]
-    plan_key = "donation"
+    parts = data.split(":")
+    plan_key = parts[1]
+    gw_choice = parts[2]
+    
     plan = config.PAY_PLANS.get(plan_key)
     if not plan:
         return
+        
+    # Delete selection message to keep chat clean
+    try:
+        await q.message.delete()
+    except Exception:
+        pass
         
     existing = await db.get_latest_open_payment_request(user_id)
     if existing:
@@ -1382,9 +1184,10 @@ async def pay_donation_type_callback(update: Update, context: ContextTypes.DEFAU
             ])
             
             status_text = (
-                "💎 <b>Premium VIP Purchase (Donation Test)</b>\n\n"
+                "💎 <b>Premium VIP Purchase</b>\n\n"
                 f"🛍 Plan: <b>{plan['label']}</b>\n"
-                f"💰 Price: {stars_amount} Stars ⭐\n\n"
+                f"💰 Price: {stars_amount} Stars ⭐\n"
+                f"⏳ Duration: {plan['days']} Days\n\n"
                 "Tap the button below to complete payment via Telegram Stars."
             )
             
@@ -1445,7 +1248,7 @@ async def pay_donation_type_callback(update: Update, context: ContextTypes.DEFAU
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=loading_msg.message_id)
             
             caption = (
-                "⚡ <b>RAZORPAY DYNAMIC QR PAYMENT (Donation Test)</b> ⚡\n\n"
+                "⚡ <b>RAZORPAY DYNAMIC QR PAYMENT</b> ⚡\n\n"
                 f"💎 <b>Plan:</b> {plan['label']}\n"
                 f"💰 <b>Amount:</b> ₹{plan['amount']}\n"
                 f"🆔 <b>Order ID:</b> <code>#{rid}</code>\n\n"
@@ -1469,7 +1272,7 @@ async def pay_donation_type_callback(update: Update, context: ContextTypes.DEFAU
             )
             
             status_text = (
-                f"<b>Payment Request #{rid} Created (Donation Test)</b>\n\n"
+                f"<b>Payment Request #{rid} Created</b>\n\n"
                 f"Plan: <b>{plan['label']}</b>\n"
                 f"Amount: ₹{plan['amount']}\n"
                 "Status: <b>Pending</b>\n\n"
@@ -1491,6 +1294,73 @@ async def pay_donation_type_callback(update: Update, context: ContextTypes.DEFAU
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="⚠️ Razorpay gateway error. Please use manual UPI payment or contact admin."
+            )
+    elif gw_choice == "manual":
+        upi_id = await db.get_setting("pay_upi")
+        pay_name = await db.get_setting("pay_name") or "Premium Store"
+        pay_text = await db.get_setting("pay_text") or "Scan the QR and pay. Enter UTR to verify."
+        
+        if not upi_id:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ UPI payment is not configured by admin yet. Please contact admin."
+            )
+            return
+            
+        projected_until = req.get("projected_premium_until") or 0
+        note = _manual_payment_note(user_id, rid, plan["days"], projected_until)
+        upi_uri = _upi_uri(upi_id=upi_id, amount_rs=plan["amount"], payee_name=pay_name, note=note)
+        qr_url = _upi_qr_image_url(upi_uri)
+        
+        caption = (
+            "⚡ <b>MANUAL UPI PAYMENT</b> ⚡\n\n"
+            f"💎 <b>Plan:</b> {plan['label']}\n"
+            f"💰 <b>Amount:</b> ₹{plan['amount']}\n"
+            f"🆔 <b>Order ID:</b> <code>#{rid}</code>\n"
+            f"👤 <b>User ID:</b> <code>{user_id}</code>\n\n"
+            f"💳 <b>UPI ID:</b> <code>{upi_id}</code>\n"
+            f"🧾 <b>Payment Note:</b> <code>{note}</code>\n\n"
+            f"📝 <b>Instructions:</b>\n{pay_text}\n\n"
+            "⏳ Valid for 5 minutes only."
+        )
+        
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎟 Submit UTR", callback_data=f"payutr:{rid}")],
+            [InlineKeyboardButton("❌ Cancel Order", callback_data=f"paycancel:{rid}")]
+        ])
+        
+        try:
+            qr_msg = await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=qr_url,
+                caption=caption,
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+            
+            status_text = (
+                f"<b>Payment Request #{rid} Created</b>\n\n"
+                f"Plan: <b>{plan['label']}</b>\n"
+                f"Amount: ₹{plan['amount']}\n"
+                "Status: <b>Pending</b>\n\n"
+                "Scan the QR above to pay. After payment, click **Submit UTR** and enter your transaction ID."
+            )
+            status_msg = await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=status_text,
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+            
+            await db.set_payment_ui_messages(rid, update.effective_chat.id, status_msg.message_id, qr_msg.message_id)
+            gateway_data = {"gateway": "manual"}
+            await db.set_payment_gateway_extra(rid, json.dumps(gateway_data))
+        except Exception as e:
+            print(f"Manual payment QR error: {e}")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"QR Code generation failed. Please transfer directly to the UPI ID: <code>{upi_id}</code>\nNote: {note}",
+                parse_mode="HTML"
             )
 
 async def back_plans_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
