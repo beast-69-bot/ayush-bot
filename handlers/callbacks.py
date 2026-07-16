@@ -1368,10 +1368,6 @@ async def back_plans_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await q.answer()
     
     from handlers.commands import plan_menu
-    try:
-        await q.message.delete()
-    except Exception:
-        pass
-    await plan_menu(update, context)
+    await plan_menu(update, context, message_id=q.message.message_id)
 
 

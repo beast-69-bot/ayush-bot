@@ -73,7 +73,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await show_main_menu(update, context)
 
-async def plan_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def plan_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, message_id=None) -> None:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     
@@ -92,12 +92,31 @@ async def plan_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard.append([InlineKeyboardButton(f"✅ {plan['label']} (₹{plan['amount']})", callback_data=f"payplan:{plan_key}")])
         
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=text,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
+    
+    chat_id = update.effective_chat.id
+    if message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        except Exception:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+    else:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
 
 async def make_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
