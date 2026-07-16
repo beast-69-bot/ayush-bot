@@ -62,6 +62,103 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
         )
         return
 
+    # 1c. Admin Withdrawal Handler
+    if context.user_data.get("awaiting_withdraw_amount"):
+        if not await db.is_admin(user_id):
+            return
+            
+        txt = (update.effective_message.text or "").strip()
+        if txt.lower() == "cancel":
+            context.user_data.pop("awaiting_withdraw_amount", None)
+            context.user_data.pop("withdraw_menu_msg_id", None)
+            await update.effective_message.reply_text("❌ Withdrawal request cancelled.")
+            from handlers.commands import show_admin_menu
+            await show_admin_menu(update, context)
+            return
+            
+        try:
+            amount = int(txt)
+            if amount <= 0:
+                raise ValueError()
+        except ValueError:
+            await update.effective_message.reply_text("⚠️ Please enter a valid positive integer amount (e.g. 500).")
+            return
+            
+        # Calculate Razorpay revenue and left amount
+        payments = await db.list_all_processed_payments()
+        gw_razorpay = 0
+        for p in payments:
+            gw = "manual"
+            gw_extra_str = p.get("gateway_extra")
+            if gw_extra_str:
+                try:
+                    import json
+                    gw_extra = json.loads(gw_extra_str)
+                    gw = gw_extra.get("gateway", "manual")
+                except Exception:
+                    if "razorpay" in gw_extra_str.lower():
+                        gw = "razorpay"
+            if gw == "razorpay":
+                gw_razorpay += p.get("amount_rs", 0)
+                
+        total_withdrawn = await db.get_total_withdrawn()
+        left_to_withdraw = max(0, gw_razorpay - total_withdrawn)
+        
+        if amount > left_to_withdraw:
+            await update.effective_message.reply_text(
+                f"❌ Cannot withdraw ₹{amount}. Max available is ₹{left_to_withdraw}.\n"
+                "Please enter a valid amount or type `cancel` to abort."
+            )
+            return
+            
+        context.user_data.pop("awaiting_withdraw_amount", None)
+        context.user_data.pop("withdraw_menu_msg_id", None)
+        
+        # Save request to database
+        wid = await db.create_withdrawal_request(user_id, amount)
+        
+        # Get target Razorpay Owner ID
+        target_owner_id = config.RAZORPAY_OWNER_ID
+        
+        # Send message to owner
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Mark Done", callback_data=f"withdraw_done:{wid}")]
+        ])
+        
+        requester_name = f"@{update.effective_user.username}" if update.effective_user.username else str(user_id)
+        owner_msg = (
+            "💸 <b>New Withdrawal Request!</b>\n\n"
+            f"🆔 Request ID: #{wid}\n"
+            f"👤 Requester: {requester_name} (ID: <code>{user_id}</code>)\n"
+            f"💰 Amount: <b>₹{amount}</b>\n\n"
+            "Click the button below once you have processed/transferred the money:"
+        )
+        
+        sent_to_owner = False
+        if target_owner_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=target_owner_id,
+                    text=owner_msg,
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+                sent_to_owner = True
+            except Exception as e:
+                print(f"Error notifying Razorpay owner: {e}")
+                
+        if sent_to_owner:
+            await update.effective_message.reply_html(
+                f"✅ Withdrawal request of <b>₹{amount}</b> sent to Razorpay Owner successfully (ID: <code>{target_owner_id}</code>)."
+            )
+        else:
+            await update.effective_message.reply_html(
+                f"⚠️ Withdrawal request created, but failed to notify Razorpay Owner (ID: <code>{target_owner_id}</code>).\n"
+                "Please notify them manually."
+            )
+            
+        return
+
     # 2. Admin Settings Field Modification
     edit_field = context.user_data.get("settings_edit_field")
     if edit_field:

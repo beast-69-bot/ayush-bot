@@ -89,6 +89,16 @@ class Database:
               gateway_extra TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_payment_requests_user ON payment_requests(user_id, status);
+
+            CREATE TABLE IF NOT EXISTS withdrawals (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              requester_id  INTEGER NOT NULL,
+              amount        INTEGER NOT NULL,
+              status        TEXT NOT NULL DEFAULT 'pending',
+              created_at    INTEGER NOT NULL,
+              updated_at    INTEGER NOT NULL,
+              processed_by  INTEGER
+            );
             """
         )
         await self.conn.commit()
@@ -589,4 +599,64 @@ class Database:
                 "gateway_extra": r[6],
             })
         return out
+
+    async def create_withdrawal_request(self, requester_id: int, amount: int) -> int:
+        now = _now()
+        cur = await self.conn.execute(
+            """
+            INSERT INTO withdrawals(requester_id, amount, status, created_at, updated_at)
+            VALUES(?, ?, 'pending', ?, ?)
+            """,
+            (int(requester_id), int(amount), now, now)
+        )
+        await self.conn.commit()
+        return int(cur.lastrowid)
+
+    async def get_withdrawal_request(self, wid: int) -> Optional[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT id, requester_id, amount, status, created_at, updated_at, processed_by
+            FROM withdrawals
+            WHERE id=?
+            """,
+            (int(wid),)
+        )
+        row = await cur.fetchone()
+        await cur.close()
+        if not row:
+            return None
+        return {
+            "id": int(row[0]),
+            "requester_id": int(row[1]),
+            "amount": int(row[2]),
+            "status": row[3],
+            "created_at": int(row[4]),
+            "updated_at": int(row[5]),
+            "processed_by": int(row[6]) if row[6] is not None else None
+        }
+
+    async def approve_withdrawal_request(self, wid: int, processed_by: int) -> bool:
+        now = _now()
+        cur = await self.conn.execute(
+            """
+            UPDATE withdrawals
+            SET status='approved', processed_by=?, updated_at=?
+            WHERE id=? AND status='pending'
+            """,
+            (int(processed_by), now, int(wid))
+        )
+        await self.conn.commit()
+        return bool(cur.rowcount and cur.rowcount > 0)
+
+    async def get_total_withdrawn(self) -> int:
+        cur = await self.conn.execute(
+            """
+            SELECT SUM(amount)
+            FROM withdrawals
+            WHERE status='approved'
+            """
+        )
+        row = await cur.fetchone()
+        await cur.close()
+        return int(row[0]) if row and row[0] is not None else 0
 

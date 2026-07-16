@@ -6,6 +6,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+RAZORPAY_OWNER_ID = int(os.getenv("RAZORPAY_OWNER_ID", str(OWNER_ID)))
 
 # Channel & Group IDs
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))

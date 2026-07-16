@@ -976,6 +976,9 @@ async def admin_revenue_menu_callback(update: Update, context: ContextTypes.DEFA
         else:
             plan_revenue[plan_key] = amount
             
+    total_withdrawn = await db.get_total_withdrawn()
+    left_to_withdraw = max(0, gw_razorpay - total_withdrawn)
+
     text = (
         "📊 <b>Elite Premium Store - Complete Revenue Report</b>\n\n"
         f"💰 <b>Total Earnings (Fiat):</b> ₹{total_rs}\n"
@@ -984,6 +987,8 @@ async def admin_revenue_menu_callback(update: Update, context: ContextTypes.DEFA
         "🔌 <b>Revenue by Payment Flow:</b>\n"
         f"• 💳 Manual UPI: ₹{gw_manual}\n"
         f"• ⚡ Razorpay Gateway: ₹{gw_razorpay}\n"
+        f"  └─ 💸 Total Withdrawn: ₹{total_withdrawn}\n"
+        f"  └─ 💰 Left to Withdraw: ₹{left_to_withdraw}\n"
         f"• ⭐ Telegram Stars: {gw_stars} Stars\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "📦 <b>Revenue by Individual Plan (Total):</b>\n"
@@ -1376,5 +1381,140 @@ async def back_plans_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     from handlers.commands import show_main_menu
     await show_main_menu(update, context, message_id=q.message.message_id)
+
+async def admin_withdraw_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    # Calculate Razorpay revenue
+    payments = await db.list_all_processed_payments()
+    gw_razorpay = 0
+    for p in payments:
+        gw = "manual"
+        gw_extra_str = p.get("gateway_extra")
+        if gw_extra_str:
+            try:
+                gw_extra = json.loads(gw_extra_str)
+                gw = gw_extra.get("gateway", "manual")
+            except Exception:
+                if "razorpay" in gw_extra_str.lower():
+                    gw = "razorpay"
+        if gw == "razorpay":
+            gw_razorpay += p.get("amount_rs", 0)
+            
+    total_withdrawn = await db.get_total_withdrawn()
+    left_to_withdraw = max(0, gw_razorpay - total_withdrawn)
+    
+    text = (
+        "💸 <b>Razorpay Withdrawal Panel</b>\n\n"
+        f"⚡ <b>Total Razorpay Revenue:</b> ₹{gw_razorpay}\n"
+        f"💸 <b>Total Withdrawn:</b> ₹{total_withdrawn}\n"
+        f"💰 <b>Left Amount to Withdraw (Available):</b> ₹{left_to_withdraw}\n\n"
+        "Click the button below to request a withdrawal from the Razorpay account owner."
+    )
+    
+    keyboard = []
+    if left_to_withdraw > 0:
+        keyboard.append([
+            InlineKeyboardButton("💸 Request Withdrawal", callback_data="admin_withdraw_req_prompt")
+        ])
+    else:
+        text += "\n\n⚠️ <i>No balance available to withdraw.</i>"
+        
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back to Admin Menu", callback_data="back_admin_main")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def admin_withdraw_req_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    context.user_data["awaiting_withdraw_amount"] = True
+    context.user_data["withdraw_menu_msg_id"] = q.message.message_id
+    
+    text = (
+        "💸 <b>Request Withdrawal</b>\n\n"
+        "Please enter the amount (in ₹) you wish to withdraw:\n"
+        "• Send a number (e.g. <code>500</code>)\n"
+        "• Send <code>cancel</code> to abort."
+    )
+    
+    keyboard = [[
+        InlineKeyboardButton("❌ Cancel & Go Back", callback_data="admin_withdraw_menu")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def withdraw_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    
+    # Must be admin to process withdrawal
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    data = q.data or ""
+    wid = int(data.split(":")[1])
+    
+    req = await db.get_withdrawal_request(wid)
+    if not req:
+        await q.answer("Request not found", show_alert=True)
+        return
+        
+    if req["status"] == "approved":
+        await q.answer("Already processed", show_alert=True)
+        return
+        
+    ok = await db.approve_withdrawal_request(wid, user_id)
+    if not ok:
+        await q.answer("Failed to approve", show_alert=True)
+        return
+        
+    admin_name = f"@{update.effective_user.username}" if update.effective_user.username else str(user_id)
+    
+    # Update owner's message
+    text = (
+        "✅ <b>Withdrawal Marked Done</b>\n\n"
+        f"Request ID: #{wid}\n"
+        f"Amount: ₹{req['amount']}\n"
+        f"Requester: <code>{req['requester_id']}</code>\n"
+        f"Processed By: {admin_name}"
+    )
+    await q.edit_message_text(text=text, parse_mode="HTML")
+    
+    # Notify the requester
+    try:
+        await context.bot.send_message(
+            chat_id=req["requester_id"],
+            text=(
+                f"🎉 <b>Withdrawal Approved & Transferred!</b>\n\n"
+                f"💸 Amount: ₹{req['amount']}\n"
+                f"🆔 Request ID: #{wid}\n"
+                f"👮 Processed By: {admin_name}"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
 
 
