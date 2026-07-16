@@ -63,19 +63,45 @@ async def _activate_payment_plan(db: Database, req: dict, bot, context: ContextT
     
     # Action plan benefits: unban & generate links
     chat_id = plan.get("chat_id")
+    
+    # Custom Group ID fetch for Faphouse/Direct plan
+    if plan_key.startswith("faphouse"):
+        connected_group = await db.get_setting("faphouse_group_id")
+        if connected_group:
+            try:
+                chat_id = int(connected_group)
+            except ValueError:
+                pass
+    elif plan_key == "direct" or plan_key.startswith("direct"):
+        connected_group = await db.get_setting("direct_group_id")
+        if connected_group:
+            try:
+                chat_id = int(connected_group)
+            except ValueError:
+                pass
+                
     if chat_id:
         try:
             # Unban member if banned
             await bot.unban_chat_member(chat_id=chat_id, user_id=user_id, only_if_banned=True)
+            
+            # Custom invite link duration (days of plan for faphouse/direct)
+            if plan_key.startswith("faphouse") or plan_key == "direct" or plan_key.startswith("direct"):
+                expire_seconds = days * 24 * 60 * 60
+                validity_desc = f"{days} Days"
+            else:
+                expire_seconds = 600
+                validity_desc = "10 minutes"
+                
             # Create a one-time invite link
             invite_link = await bot.create_chat_invite_link(
                 chat_id=chat_id,
                 member_limit=1,
-                expire_date=int(time.time()) + 600
+                expire_date=int(time.time()) + expire_seconds
             )
             success_msg = (
                 f"🎉 Welcome to premium VIP!\n\n"
-                f"Here is your join link (valid for 10 minutes):\n"
+                f"Here is your join link (valid for {validity_desc}, one-time use):\n"
                 f"🔗 {invite_link.invite_link}"
             )
             await bot.send_message(chat_id=user_id, text=success_msg)
@@ -854,6 +880,61 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
 
         
     await db.clear_payment_ui_messages(int(req["id"]))
+
+# --- ADMIN GROUP CONNECTION CALLBACKS ---
+
+async def admin_group_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    current_faphouse = await db.get_setting("faphouse_group_id") or "Not Connected"
+    current_direct = await db.get_setting("direct_group_id") or "Not Connected"
+    
+    text = (
+        "🔌 <b>Connect Group to Plans</b>\n\n"
+        f"Current Faphouse Group ID: <code>{current_faphouse}</code>\n"
+        f"Current Direct Mods Channel ID: <code>{current_direct}</code>\n\n"
+        "Select a plan category to connect a group/channel:"
+    )
+    
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔥 Faphouse Paid", callback_data="admin_connect_group:faphouse")],
+        [InlineKeyboardButton("🎮 Direct Mods", callback_data="admin_connect_group:direct")],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_admin_main")]
+    ])
+    
+    await q.edit_message_text(text=text, reply_markup=kb, parse_mode="HTML")
+
+async def admin_connect_group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    parts = q.data.split(":")
+    plan_category = parts[1]
+    
+    context.user_data["awaiting_group_connect_category"] = plan_category
+    context.user_data["group_connect_msg_id"] = q.message.message_id
+    
+    text = (
+        f"✉️ <b>Connect Group for {plan_category.capitalize()}</b>\n\n"
+        "Please send the Group Chat ID (e.g. <code>-100234567890</code>) where users should be added.\n\n"
+        "⚠️ <b>Important:</b> Make sure the bot is added to that group as an administrator!\n\n"
+        "Type <code>cancel</code> to abort."
+    )
+    
+    await q.edit_message_text(text=text, parse_mode="HTML")
 
 # --- ADDITIONAL MANUAL VERIFICATION ADMIN CALLBACKS ---
 

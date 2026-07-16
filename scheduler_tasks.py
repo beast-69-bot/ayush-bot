@@ -20,11 +20,33 @@ async def check_expiry(context: ContextTypes.DEFAULT_TYPE) -> None:
         ) as cursor:
             expired = await cursor.fetchall()
             
+        faphouse_group_str = await db.get_setting("faphouse_group_id")
+        faphouse_chat_id = None
+        if faphouse_group_str:
+            try:
+                faphouse_chat_id = int(faphouse_group_str)
+            except ValueError:
+                pass
+
+        direct_group_str = await db.get_setting("direct_group_id")
+        direct_chat_id = None
+        if direct_group_str:
+            try:
+                direct_chat_id = int(direct_group_str)
+            except ValueError:
+                pass
+
         for (user_id,) in expired:
             logger.info(f"Subscription expired for user: {user_id}")
             
-            # Kick user from the premium channel and group (if configured)
-            for chat_id in (config.CHANNEL_ID, config.GROUP_ID):
+            # Kick user from the premium channel, config group, and custom connected groups (if configured)
+            chats_to_kick = [config.CHANNEL_ID, config.GROUP_ID]
+            if faphouse_chat_id:
+                chats_to_kick.append(faphouse_chat_id)
+            if direct_chat_id:
+                chats_to_kick.append(direct_chat_id)
+                
+            for chat_id in chats_to_kick:
                 if chat_id:
                     try:
                         # Ban and then unban immediately to kick user out

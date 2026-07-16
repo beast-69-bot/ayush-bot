@@ -18,7 +18,8 @@ from handlers.callbacks import (
     admin_revenue_menu_callback, admin_broadcast_menu_callback, broadcast_confirm_callback,
     back_admin_main_callback, admin_close_callback, admin_action_callback,
     pay_gw_choice_callback, back_plans_callback,
-    admin_withdraw_menu_callback, admin_withdraw_req_prompt_callback, withdraw_done_callback
+    admin_withdraw_menu_callback, admin_withdraw_req_prompt_callback, withdraw_done_callback,
+    admin_group_menu_callback, admin_connect_group_callback
 )
 from handlers.messages import handle_incoming_messages
 
@@ -65,6 +66,10 @@ def register_all_handlers(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(admin_withdraw_menu_callback, pattern=r"^admin_withdraw_menu$"))
     app.add_handler(CallbackQueryHandler(admin_withdraw_req_prompt_callback, pattern=r"^admin_withdraw_req_prompt$"))
     app.add_handler(CallbackQueryHandler(withdraw_done_callback, pattern=r"^withdraw_done:"))
+    
+    # Group Connect callbacks
+    app.add_handler(CallbackQueryHandler(admin_group_menu_callback, pattern=r"^admin_group_menu$"))
+    app.add_handler(CallbackQueryHandler(admin_connect_group_callback, pattern=r"^admin_connect_group:"))
     
     # Donation & Gateway Choice handlers
     app.add_handler(CallbackQueryHandler(pay_gw_choice_callback, pattern=r"^paygwchoice:"))

@@ -319,7 +319,8 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, me
             InlineKeyboardButton("📊 Revenue Reports", callback_data="admin_revenue_menu")
         ],
         [
-            InlineKeyboardButton("💸 Withdraw Razorpay", callback_data="admin_withdraw_menu")
+            InlineKeyboardButton("💸 Withdraw Razorpay", callback_data="admin_withdraw_menu"),
+            InlineKeyboardButton("🔗 Group Connect", callback_data="admin_group_menu")
         ],
         [
             InlineKeyboardButton("❌ Close Menu", callback_data="admin_close")

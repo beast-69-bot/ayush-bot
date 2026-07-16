@@ -169,6 +169,72 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
             
         return
 
+    # 1d. Admin Group Connect Handler
+    connect_category = context.user_data.get("awaiting_group_connect_category")
+    if connect_category:
+        if not await db.is_admin(user_id):
+            return
+            
+        txt = (update.effective_message.text or "").strip()
+        menu_msg_id = context.user_data.pop("group_connect_msg_id", None)
+        
+        if txt.lower() == "cancel":
+            context.user_data.pop("awaiting_group_connect_category", None)
+            if menu_msg_id:
+                try:
+                    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=menu_msg_id)
+                except Exception:
+                    pass
+            await update.effective_message.reply_text("❌ Group connection cancelled.")
+            from handlers.commands import show_admin_menu
+            await show_admin_menu(update, context)
+            return
+            
+        try:
+            # Must be an integer representing group chat ID
+            group_id = int(txt)
+        except ValueError:
+            await update.effective_message.reply_text("⚠️ Please send a valid integer Group ID (e.g. -100xxxxxxxxxx) or type `cancel` to abort.")
+            context.user_data["group_connect_msg_id"] = menu_msg_id
+            return
+            
+        context.user_data.pop("awaiting_group_connect_category", None)
+        if menu_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=menu_msg_id)
+            except Exception:
+                pass
+                
+        verifying_msg = await update.effective_message.reply_text("⏳ Verifying connection... sending `done` in the group.")
+        
+        try:
+            # 1. Send "done" to the group
+            await context.bot.send_message(chat_id=group_id, text="done")
+            
+            # 2. Save group ID to database
+            await db.set_setting(f"{connect_category}_group_id", str(group_id))
+            
+            await verifying_msg.edit_text(
+                f"✅ <b>Group Connected Successfully!</b>\n\n"
+                f"Category: <code>{connect_category.capitalize()}</code>\n"
+                f"Group ID: <code>{group_id}</code>\n\n"
+                f"Bot has sent a <code>done</code> message to the group to confirm connection.",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            await verifying_msg.edit_text(
+                f"❌ <b>Verification Failed!</b>\n\n"
+                f"Error: <code>{html.escape(str(e))}</code>\n\n"
+                f"Please ensure:\n"
+                f"1. The Group ID is correct (including negative sign/prefix).\n"
+                f"2. The bot has been added to that group as an **Administrator** with permission to send messages.",
+                parse_mode="HTML"
+            )
+            
+        from handlers.commands import show_admin_menu
+        await show_admin_menu(update, context)
+        return
+
     # 2. Admin Settings Field Modification
     edit_field = context.user_data.get("settings_edit_field")
     if edit_field:
