@@ -586,6 +586,13 @@ async def info_screens_callback(update: Update, context: ContextTypes.DEFAULT_TY
             InlineKeyboardButton("🔥 3 Days (₹15)", callback_data="payplan:faphouse_3"),
             InlineKeyboardButton("🔥 7 Days (₹25)", callback_data="payplan:faphouse_7")
         ])
+    elif data == 'info_donation':
+        text = (
+            "❤️ <b>Test Donation (₹1 / 1 Star)</b> ❤️\n\n"
+            "Support our development and test the Razorpay/Stars auto-verification flows.\n\n"
+            "<b>Price: ₹1 / 1 Star ⭐</b>"
+        )
+        kb.append([InlineKeyboardButton("💳 Donate now", callback_data="payplan:donation")])
         
     kb.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
     reply_markup = InlineKeyboardMarkup(kb)

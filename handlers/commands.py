@@ -13,7 +13,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, mes
             InlineKeyboardButton("🚫 No Getpin", callback_data="info_getpin")
         ],
         [
-            InlineKeyboardButton("🔥 Faphouse Paid", callback_data="info_faphouse")
+            InlineKeyboardButton("🔥 Faphouse Paid", callback_data="info_faphouse"),
+            InlineKeyboardButton("❤️ Test Donation", callback_data="info_donation")
         ],
         [
             InlineKeyboardButton("📦 My Orders", callback_data="my_orders"),
@@ -33,7 +34,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, mes
         "Select a premium plan below to get instant access:\n\n"
         "🎮 <b>Direct Mods</b> - Premium Apps\n"
         "🚫 <b>No Getpin</b> - Remove getpin easily\n"
-        "🔥 <b>Faphouse Paid</b> - Exclusive content\n\n"
+        "🔥 <b>Faphouse Paid</b> - Exclusive content\n"
+        "❤️ <b>Test Donation</b> - Test payments\n\n"
         "Use /plan or /pay to see pricing and purchase premium VIP access."
     )
     

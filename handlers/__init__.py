@@ -24,8 +24,8 @@ from handlers.messages import handle_incoming_messages
 def register_all_handlers(app: Application) -> None:
     # 1. Command Handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("plan", plan_menu))
-    app.add_handler(CommandHandler("pay", plan_menu))
+    app.add_handler(CommandHandler("plan", start))
+    app.add_handler(CommandHandler("pay", start))
     app.add_handler(CommandHandler("makeadmin", make_admin))
     app.add_handler(CommandHandler("details", details))
     app.add_handler(CommandHandler("paylookup", pay_lookup))
