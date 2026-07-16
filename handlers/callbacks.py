@@ -64,16 +64,9 @@ async def _activate_payment_plan(db: Database, req: dict, bot, context: ContextT
     # Action plan benefits: unban & generate links
     chat_id = plan.get("chat_id")
     
-    # Custom Group ID fetch for Faphouse/Direct plan
+    # Custom Group ID fetch for Faphouse plan
     if plan_key.startswith("faphouse"):
         connected_group = await db.get_setting("faphouse_group_id")
-        if connected_group:
-            try:
-                chat_id = int(connected_group)
-            except ValueError:
-                pass
-    elif plan_key == "direct" or plan_key.startswith("direct"):
-        connected_group = await db.get_setting("direct_group_id")
         if connected_group:
             try:
                 chat_id = int(connected_group)
@@ -85,8 +78,8 @@ async def _activate_payment_plan(db: Database, req: dict, bot, context: ContextT
             # Unban member if banned
             await bot.unban_chat_member(chat_id=chat_id, user_id=user_id, only_if_banned=True)
             
-            # Custom invite link duration (days of plan for faphouse/direct)
-            if plan_key.startswith("faphouse") or plan_key == "direct" or plan_key.startswith("direct"):
+            # Custom invite link duration (days of plan for faphouse)
+            if plan_key.startswith("faphouse"):
                 expire_seconds = days * 24 * 60 * 60
                 validity_desc = f"{days} Days"
             else:
@@ -893,19 +886,16 @@ async def admin_group_menu_callback(update: Update, context: ContextTypes.DEFAUL
         await q.answer("Access denied", show_alert=True)
         return
         
-    current_faphouse = await db.get_setting("faphouse_group_id") or "Not Connected"
-    current_direct = await db.get_setting("direct_group_id") or "Not Connected"
+    current_group = await db.get_setting("faphouse_group_id") or "Not Connected"
     
     text = (
         "🔌 <b>Connect Group to Plans</b>\n\n"
-        f"Current Faphouse Group ID: <code>{current_faphouse}</code>\n"
-        f"Current Direct Mods Channel ID: <code>{current_direct}</code>\n\n"
-        "Select a plan category to connect a group/channel:"
+        f"Current Faphouse Group ID: <code>{current_group}</code>\n\n"
+        "Select a plan category to connect a group:"
     )
     
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔥 Faphouse Paid", callback_data="admin_connect_group:faphouse")],
-        [InlineKeyboardButton("🎮 Direct Mods", callback_data="admin_connect_group:direct")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_admin_main")]
     ])
     
