@@ -1,0 +1,7 @@
+python-telegram-bot[job-queue]>=20.0
+razorpay
+python-dotenv
+aiosqlite
+aiohttp
+qrcode
+pillow

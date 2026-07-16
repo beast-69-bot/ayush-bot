@@ -1,0 +1,520 @@
+from __future__ import annotations
+
+import os
+import time
+from typing import Any, Optional
+import aiosqlite
+import config
+
+def _now() -> int:
+    return int(time.time())
+
+class Database:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self._conn: aiosqlite.Connection | None = None
+        self._settings_cache: dict[str, str | None] = {}
+        self._admins_cache: set[int] | None = None
+
+    async def init(self) -> None:
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        self._conn = await aiosqlite.connect(self.path)
+        await self._conn.execute("PRAGMA journal_mode=WAL;")
+        await self._conn.execute("PRAGMA synchronous=NORMAL;")
+        await self._conn.execute("PRAGMA foreign_keys=ON;")
+        await self._ensure_schema()
+        await self._seed_default_settings()
+
+    @property
+    def conn(self) -> aiosqlite.Connection:
+        assert self._conn is not None
+        return self._conn
+
+    async def close(self) -> None:
+        if self._conn is not None:
+            await self._conn.close()
+            self._conn = None
+
+    async def _ensure_schema(self) -> None:
+        await self.conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+              user_id       INTEGER PRIMARY KEY,
+              first_name    TEXT,
+              username      TEXT,
+              premium_until INTEGER NOT NULL DEFAULT 0,
+              premium_daily_limit INTEGER NOT NULL DEFAULT 7,
+              created_at    INTEGER NOT NULL,
+              last_seen     INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS admins (
+              user_id  INTEGER PRIMARY KEY,
+              added_by INTEGER NOT NULL,
+              added_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+              key   TEXT PRIMARY KEY,
+              value TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS bot_bans (
+              user_id INTEGER PRIMARY KEY,
+              banned_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS reports (
+              user_id INTEGER PRIMARY KEY,
+              last_report REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS payment_requests (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id       INTEGER NOT NULL,
+              plan_key      TEXT NOT NULL,
+              plan_days     INTEGER NOT NULL,
+              amount_rs     INTEGER NOT NULL,
+              projected_premium_until INTEGER,
+              status        TEXT NOT NULL DEFAULT 'pending', -- pending|submitted|processed|rejected|expired
+              utr_text      TEXT,
+              user_chat_id  INTEGER,
+              details_msg_id INTEGER,
+              qr_msg_id     INTEGER,
+              expires_at    INTEGER,
+              created_at    INTEGER NOT NULL,
+              updated_at    INTEGER NOT NULL,
+              processed_by  INTEGER,
+              processed_at  INTEGER,
+              gateway_extra TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_payment_requests_user ON payment_requests(user_id, status);
+            """
+        )
+        await self.conn.commit()
+
+    async def _seed_default_settings(self) -> None:
+        # Seed Owner Admin
+        now = _now()
+        if config.OWNER_ID:
+            await self.conn.execute(
+                "INSERT OR IGNORE INTO admins(user_id, added_by, added_at) VALUES(?, 0, ?)",
+                (config.OWNER_ID, now)
+            )
+        
+        # Seed default payment settings
+        default_settings = {
+            "payment_gateway": "manual",
+            "pay_upi": config.UPI_ID,
+            "pay_name": "Elite Premium Store",
+            "pay_text": "Please pay the amount using the QR code above or UPI ID. After payment, click 'Submit UTR' and enter your 12-digit UTR/Transaction ID for verification.",
+            "razorpay_key_id": config.RZP_KEY_ID,
+            "razorpay_key_secret": config.RZP_KEY_SECRET,
+        }
+        for k, v in default_settings.items():
+            if v is not None:
+                await self.conn.execute(
+                    "INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)",
+                    (k, str(v))
+                )
+        await self.conn.commit()
+
+    # Users
+    async def upsert_user(self, user_id: int, first_name: str | None, username: str | None) -> None:
+        now = _now()
+        await self.conn.execute(
+            """
+            INSERT INTO users(user_id, first_name, username, premium_until, created_at, last_seen)
+            VALUES(?, ?, ?, 0, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+              first_name=excluded.first_name,
+              username=excluded.username,
+              last_seen=excluded.last_seen
+            """,
+            (int(user_id), first_name, username, now, now),
+        )
+        await self.conn.commit()
+
+    async def is_premium_active(self, user_id: int) -> bool:
+        now = _now()
+        cur = await self.conn.execute("SELECT premium_until FROM users WHERE user_id=?", (int(user_id),))
+        row = await cur.fetchone()
+        await cur.close()
+        return bool(row and int(row[0]) >= now)
+
+    async def get_premium_until(self, user_id: int) -> int:
+        cur = await self.conn.execute("SELECT premium_until FROM users WHERE user_id=?", (int(user_id),))
+        row = await cur.fetchone()
+        await cur.close()
+        return int(row[0]) if row and row[0] is not None else 0
+
+    async def get_user(self, user_id: int) -> Optional[dict[str, Any]]:
+        cur = await self.conn.execute(
+            "SELECT user_id, first_name, username, premium_until, created_at, last_seen FROM users WHERE user_id=?",
+            (int(user_id),),
+        )
+        row = await cur.fetchone()
+        await cur.close()
+        if not row:
+            return None
+        return {
+            "user_id": int(row[0]),
+            "first_name": row[1] or "",
+            "username": row[2] or "",
+            "premium_until": int(row[3]) if row[3] is not None else 0,
+            "created_at": int(row[4]) if row[4] is not None else 0,
+            "last_seen": int(row[5]) if row[5] is not None else 0,
+        }
+
+    async def add_premium_seconds(self, user_id: int, seconds: int) -> int:
+        now = _now()
+        cur = await self.conn.execute("SELECT premium_until FROM users WHERE user_id=?", (int(user_id),))
+        row = await cur.fetchone()
+        await cur.close()
+        current = int(row[0]) if row else 0
+        new_until = max(current, now) + int(seconds)
+        await self.conn.execute(
+            """
+            INSERT INTO users(user_id, premium_until, created_at, last_seen)
+            VALUES(?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET premium_until=excluded.premium_until, last_seen=excluded.last_seen
+            """,
+            (int(user_id), int(new_until), now, now),
+        )
+        await self.conn.commit()
+        return int(new_until)
+
+    async def set_premium_until(self, user_id: int, premium_until: int) -> None:
+        now = _now()
+        await self.conn.execute(
+            """
+            INSERT INTO users(user_id, premium_until, created_at, last_seen)
+            VALUES(?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET premium_until=excluded.premium_until, last_seen=excluded.last_seen
+            """,
+            (int(user_id), int(premium_until), now, now),
+        )
+        await self.conn.commit()
+
+    async def set_premium_daily_limit(self, user_id: int, daily_limit: int) -> None:
+        now = _now()
+        await self.conn.execute(
+            """
+            INSERT INTO users(user_id, premium_until, premium_daily_limit, created_at, last_seen)
+            VALUES(?, 0, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET premium_daily_limit=excluded.premium_daily_limit, last_seen=excluded.last_seen
+            """,
+            (int(user_id), int(daily_limit), now, now),
+        )
+        await self.conn.commit()
+
+    # Admins
+    async def is_admin(self, user_id: int) -> bool:
+        if self._admins_cache is None:
+            self._admins_cache = set(await self.list_admin_ids())
+        return int(user_id) in self._admins_cache
+
+    async def add_admin(self, user_id: int, added_by: int = 0) -> None:
+        if self._admins_cache is not None:
+            self._admins_cache.add(int(user_id))
+        now = _now()
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO admins(user_id, added_by, added_at) VALUES(?, ?, ?)",
+            (int(user_id), int(added_by), now),
+        )
+        await self.conn.commit()
+
+    async def remove_admin(self, user_id: int) -> None:
+        if self._admins_cache is not None:
+            self._admins_cache.discard(int(user_id))
+        await self.conn.execute("DELETE FROM admins WHERE user_id=?", (int(user_id),))
+        await self.conn.commit()
+
+    async def list_admin_ids(self) -> list[int]:
+        cur = await self.conn.execute("SELECT user_id FROM admins")
+        rows = await cur.fetchall()
+        await cur.close()
+        return [int(r[0]) for r in rows]
+
+    # Settings
+    async def set_setting(self, key: str, value: str | None) -> None:
+        self._settings_cache[key] = value
+        if value is None:
+            await self.conn.execute("DELETE FROM settings WHERE key=?", (key,))
+        else:
+            await self.conn.execute(
+                "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+        await self.conn.commit()
+
+    async def get_setting(self, key: str) -> Optional[str]:
+        if key in self._settings_cache:
+            return self._settings_cache[key]
+        cur = await self.conn.execute("SELECT value FROM settings WHERE key=?", (key,))
+        row = await cur.fetchone()
+        await cur.close()
+        val = row[0] if row else None
+        self._settings_cache[key] = val
+        return val
+
+    # Bot Bans
+    async def is_bot_banned(self, user_id: int) -> bool:
+        cur = await self.conn.execute("SELECT 1 FROM bot_bans WHERE user_id=?", (int(user_id),))
+        row = await cur.fetchone()
+        await cur.close()
+        return row is not None
+
+    async def ban_from_bot(self, user_id: int) -> None:
+        now = _now()
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO bot_bans(user_id, banned_at) VALUES(?, ?)",
+            (int(user_id), now)
+        )
+        await self.conn.commit()
+
+    async def unban_from_bot(self, user_id: int) -> None:
+        await self.conn.execute("DELETE FROM bot_bans WHERE user_id=?", (int(user_id),))
+        await self.conn.commit()
+
+    # Reports
+    async def add_report(self, user_id: int, timestamp: float) -> None:
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO reports(user_id, last_report) VALUES(?, ?)",
+            (int(user_id), timestamp)
+        )
+        await self.conn.commit()
+
+    async def get_last_report(self, user_id: int) -> Optional[float]:
+        cur = await self.conn.execute("SELECT last_report FROM reports WHERE user_id=?", (int(user_id),))
+        row = await cur.fetchone()
+        await cur.close()
+        return row[0] if row else None
+
+    # Payments
+    async def create_payment_request(self, user_id: int, plan_key: str, plan_days: int, amount_rs: int) -> int:
+        now = _now()
+        expires_at = now + 300  # 5 minutes expiry
+        current_until = await self.get_premium_until(int(user_id))
+        projected_until = max(int(current_until), now) + (int(plan_days) * 24 * 60 * 60)
+        cur = await self.conn.execute(
+            """
+            INSERT INTO payment_requests(
+              user_id, plan_key, plan_days, amount_rs, projected_premium_until,
+              status, expires_at, created_at, updated_at
+            )
+            VALUES(?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+            """,
+            (
+                int(user_id),
+                plan_key,
+                int(plan_days),
+                int(amount_rs),
+                int(projected_until),
+                int(expires_at),
+                now,
+                now,
+            ),
+        )
+        await self.conn.commit()
+        return int(cur.lastrowid)
+
+    async def set_payment_utr(self, request_id: int, utr_text: str) -> bool:
+        now = _now()
+        cur = await self.conn.execute(
+            """
+            UPDATE payment_requests
+            SET utr_text=?, status='submitted', updated_at=?
+            WHERE id=? AND status IN ('pending', 'submitted')
+            """,
+            (utr_text, now, int(request_id)),
+        )
+        await self.conn.commit()
+        return bool(cur.rowcount and cur.rowcount > 0)
+
+    async def get_payment_request(self, request_id: int) -> Optional[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT id, user_id, plan_key, plan_days, amount_rs, projected_premium_until, status, utr_text, user_chat_id, details_msg_id, qr_msg_id, expires_at, created_at, updated_at, processed_by, processed_at, gateway_extra
+            FROM payment_requests
+            WHERE id=?
+            """,
+            (int(request_id),),
+        )
+        row = await cur.fetchone()
+        await cur.close()
+        if not row:
+            return None
+        return {
+            "id": int(row[0]),
+            "user_id": int(row[1]),
+            "plan_key": row[2],
+            "plan_days": int(row[3]),
+            "amount_rs": int(row[4]),
+            "projected_premium_until": int(row[5]) if row[5] is not None else 0,
+            "status": row[6],
+            "utr_text": row[7],
+            "user_chat_id": int(row[8]) if row[8] is not None else None,
+            "details_msg_id": int(row[9]) if row[9] is not None else None,
+            "qr_msg_id": int(row[10]) if row[10] is not None else None,
+            "expires_at": int(row[11]) if row[11] is not None else 0,
+            "created_at": int(row[12]),
+            "updated_at": int(row[13]),
+            "processed_by": row[14],
+            "processed_at": row[15],
+            "gateway_extra": row[16] if len(row) > 16 else None,
+        }
+
+    async def get_latest_open_payment_request(self, user_id: int) -> Optional[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT id
+            FROM payment_requests
+            WHERE user_id=? AND status IN ('pending', 'submitted')
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (int(user_id),),
+        )
+        row = await cur.fetchone()
+        await cur.close()
+        if not row:
+            return None
+        return await self.get_payment_request(int(row[0]))
+
+    async def set_payment_ui_messages(self, request_id: int, user_chat_id: int, details_msg_id: int, qr_msg_id: int | None) -> None:
+        now = _now()
+        await self.conn.execute(
+            """
+            UPDATE payment_requests
+            SET user_chat_id=?, details_msg_id=?, qr_msg_id=?, updated_at=?
+            WHERE id=?
+            """,
+            (int(user_chat_id), int(details_msg_id), int(qr_msg_id) if qr_msg_id is not None else None, now, int(request_id)),
+        )
+        await self.conn.commit()
+
+    async def clear_payment_ui_messages(self, request_id: int) -> None:
+        now = _now()
+        await self.conn.execute(
+            """
+            UPDATE payment_requests
+            SET user_chat_id=NULL, details_msg_id=NULL, qr_msg_id=NULL, updated_at=?
+            WHERE id=?
+            """,
+            (now, int(request_id)),
+        )
+        await self.conn.commit()
+
+    async def set_payment_gateway_extra(self, request_id: int, gateway_extra: str) -> None:
+        now = _now()
+        await self.conn.execute(
+            """
+            UPDATE payment_requests
+            SET gateway_extra=?, updated_at=?
+            WHERE id=?
+            """,
+            (gateway_extra, now, int(request_id)),
+        )
+        await self.conn.commit()
+
+    async def expire_payment_request_if_pending(self, request_id: int) -> bool:
+        now = _now()
+        cur = await self.conn.execute(
+            """
+            UPDATE payment_requests
+            SET status='expired', updated_at=?
+            WHERE id=? AND status='pending' AND (utr_text IS NULL OR TRIM(utr_text)='')
+            """,
+            (now, int(request_id)),
+        )
+        await self.conn.commit()
+        return bool(cur.rowcount and cur.rowcount > 0)
+
+    async def approve_payment_request(self, request_id: int, admin_id: int) -> bool:
+        now = _now()
+        cur = await self.conn.execute(
+            """
+            UPDATE payment_requests
+            SET status='processed', processed_by=?, processed_at=?, updated_at=?
+            WHERE id=? AND status IN ('submitted', 'pending')
+            """,
+            (int(admin_id), now, now, int(request_id)),
+        )
+        await self.conn.commit()
+        return bool(cur.rowcount and cur.rowcount > 0)
+
+    async def reject_payment_request(self, request_id: int, admin_id: int) -> bool:
+        now = _now()
+        cur = await self.conn.execute(
+            """
+            UPDATE payment_requests
+            SET status='rejected', processed_by=?, processed_at=?, updated_at=?
+            WHERE id=? AND status IN ('submitted', 'pending')
+            """,
+            (int(admin_id), now, now, int(request_id)),
+        )
+        await self.conn.commit()
+        return bool(cur.rowcount and cur.rowcount > 0)
+
+    async def list_pending_payment_requests(self) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT id, user_id, plan_key, plan_days, amount_rs, projected_premium_until, status, utr_text, user_chat_id, details_msg_id, qr_msg_id, expires_at, created_at, updated_at, processed_by, processed_at, gateway_extra
+            FROM payment_requests
+            WHERE status='pending'
+            """
+        )
+        rows = await cur.fetchall()
+        await cur.close()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            out.append({
+                "id": int(row[0]),
+                "user_id": int(row[1]),
+                "plan_key": row[2],
+                "plan_days": int(row[3]),
+                "amount_rs": int(row[4]),
+                "projected_premium_until": int(row[5]) if row[5] is not None else 0,
+                "status": row[6],
+                "utr_text": row[7],
+                "user_chat_id": int(row[8]) if row[8] is not None else None,
+                "details_msg_id": int(row[9]) if row[9] is not None else None,
+                "qr_msg_id": int(row[10]) if row[10] is not None else None,
+                "expires_at": int(row[11]) if row[11] is not None else 0,
+                "created_at": int(row[12]),
+                "updated_at": int(row[13]),
+                "processed_by": row[14],
+                "processed_at": row[15],
+                "gateway_extra": row[16] if len(row) > 16 else None,
+            })
+        return out
+
+    async def list_processed_payment_requests(self, since_ts: int, until_ts: int) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT id, user_id, plan_key, plan_days, amount_rs, processed_at
+            FROM payment_requests
+            WHERE status='processed'
+              AND processed_at IS NOT NULL
+              AND processed_at>=?
+              AND processed_at<=?
+            ORDER BY processed_at ASC, id ASC
+            """,
+            (int(since_ts), int(until_ts)),
+        )
+        rows = await cur.fetchall()
+        await cur.close()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "id": int(r[0]),
+                    "user_id": int(r[1]),
+                    "plan_key": str(r[2] or ""),
+                    "plan_days": int(r[3]) if r[3] is not None else 0,
+                    "amount_rs": int(r[4]) if r[4] is not None else 0,
+                    "processed_at": int(r[5]) if r[5] is not None else 0,
+                }
+            )
+        return out

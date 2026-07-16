@@ -1,0 +1,212 @@
+import re
+import html
+import time
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from database import Database
+import config
+from handlers.callbacks import _notify_payment_admins, _update_payment_user_status, _delete_payment_qr_message
+from handlers.commands import settings_menu
+
+async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.effective_chat or not update.effective_message:
+        return
+
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+
+    # 1. Block Banned Users
+    if await db.is_bot_banned(user_id):
+        return
+
+    # 2. Admin Settings Field Modification
+    edit_field = context.user_data.get("settings_edit_field")
+    if edit_field:
+        new_val = update.effective_message.text
+        if new_val is not None:
+            new_val = new_val.strip()
+            await db.set_setting(edit_field, new_val)
+            context.user_data.pop("settings_edit_field", None)
+            
+            # Retrieve the menu message ID to update it
+            menu_msg_id = context.user_data.pop("settings_edit_msg_id", None)
+            
+            await update.effective_message.reply_html(f"✅ Setting <code>{edit_field}</code> updated successfully!")
+            
+            # Show updated menu
+            await settings_menu(update, context, message_id=menu_msg_id)
+        else:
+            await update.effective_message.reply_text("⚠️ Please send a valid text value.")
+        return
+
+    # 3. Admin Send Reply Handler
+    admin_reply_target = context.user_data.get("admin_reply_target")
+    if admin_reply_target:
+        if not await db.is_admin(user_id):
+            return
+        reply_text = update.effective_message.text
+        if reply_text:
+            context.user_data.pop("admin_reply_target", None)
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_reply_target,
+                    text=f"💬 <b>Admin Replied:</b>\n\n{html.escape(reply_text)}",
+                    parse_mode="HTML"
+                )
+                await update.effective_message.reply_text("✅ Reply sent successfully!")
+            except Exception as e:
+                await update.effective_message.reply_text(f"❌ Failed to send reply: {e}")
+        else:
+            await update.effective_message.reply_text("⚠️ Please enter a text message to reply.")
+        return
+
+    # 4. User Submit Report Handler
+    if context.user_data.get("awaiting_report"):
+        report_text = update.effective_message.text
+        if report_text:
+            context.user_data.pop("awaiting_report", None)
+            await db.add_report(user_id, time.time())
+            
+            # Forward report to all admins
+            admin_ids = await db.list_admin_ids()
+            targets = {config.OWNER_ID, *admin_ids}
+            
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Reply to User", callback_data=f"reply:{user_id}")]
+            ])
+            
+            admin_msg = (
+                f"🚨 <b>New Support Report!</b>\n"
+                f"From: <code>{user_id}</code>\n\n"
+                f"<blockquote>{html.escape(report_text)}</blockquote>"
+            )
+            for aid in targets:
+                if aid:
+                    try:
+                        await context.bot.send_message(chat_id=aid, text=admin_msg, reply_markup=kb, parse_mode="HTML")
+                    except Exception:
+                        pass
+            await update.effective_message.reply_text("✅ Aapki report admin ko bhej di gayi hai. Jaldi hi reply aayega.")
+        else:
+            await update.effective_message.reply_text("⚠️ Please describe your issue in a text message.")
+        return
+
+    # 5. User Submit UTR / Screenshot
+    pay_utr_rid = context.user_data.get("pay_utr_request_id")
+    if pay_utr_rid:
+        req = await db.get_payment_request(int(pay_utr_rid))
+        if not req:
+            context.user_data.pop("pay_utr_request_id", None)
+            await update.effective_message.reply_text("❌ Payment request expired/invalid. Please run /pay again.")
+            return
+
+        now = int(time.time())
+        if req["status"] == "pending" and req["expires_at"] <= now:
+            await db.expire_payment_request_if_pending(req["id"])
+            await _delete_payment_qr_message(req, context)
+            await _update_payment_user_status(req, context, "Payment Timeout", ["Status: <b>Expired</b>"])
+            context.user_data.pop("pay_utr_request_id", None)
+            await update.effective_message.reply_text("⏳ Payment request expired. Please run /pay again.")
+            return
+
+        # Extract UTR text or media info
+        utr_text = (update.effective_message.text or "").strip()
+        has_media = False
+        
+        if not utr_text:
+            if update.effective_message.photo:
+                utr_text = f"screenshot:{update.effective_message.photo[-1].file_id[:15]}"
+                has_media = True
+            elif update.effective_message.document:
+                utr_text = f"document:{update.effective_message.document.file_id[:15]}"
+                has_media = True
+            else:
+                await update.effective_message.reply_text("⚠️ Please send a 12-digit UTR text or a payment screenshot.")
+                return
+
+        # Validate UTR text formatting if it's text input (must be a 12-digit number)
+        if not has_media:
+            if not re.match(r"^\d{12}$", utr_text):
+                await update.effective_message.reply_text("❌ Invalid format! UTR must be exactly a 12-digit number. Please enter it again.")
+                return
+
+        ok = await db.set_payment_utr(req["id"], utr_text)
+        context.user_data.pop("pay_utr_request_id", None)
+        
+        if not ok:
+            await update.effective_message.reply_text("❌ Payment request expired/invalid. Please run /pay again.")
+            return
+
+        # Reload updated request
+        updated_req = await db.get_payment_request(req["id"])
+        
+        # Notify admins and forward copy of media proof if present
+        admin_ids = await db.list_admin_ids()
+        targets = {config.OWNER_ID, *admin_ids}
+        
+        await _notify_payment_admins(context, updated_req, utr_text)
+        
+        # Forward the actual screenshot/file proof message to admins
+        for aid in targets:
+            if aid:
+                try:
+                    await context.bot.copy_message(
+                        chat_id=aid,
+                        from_chat_id=update.effective_chat.id,
+                        message_id=update.effective_message.message_id
+                    )
+                except Exception:
+                    pass
+
+        await _delete_payment_qr_message(updated_req, context)
+        await _update_payment_user_status(
+            updated_req,
+            context,
+            "Payment Verification Underway",
+            [
+                "Status: <b>Verification Pending</b>",
+                "Our team is manually verifying your payment.",
+                "Premium VIP benefits will activate immediately upon verification."
+            ]
+        )
+        
+        await update.effective_message.reply_text(
+            "✅ Proof submitted successfully!\n"
+            "Our admin team has been notified. Verification normally takes a few minutes."
+        )
+        return
+
+    # 6. User Submit Getpin Screenshot
+    if context.user_data.get("awaiting_getpin_ss"):
+        if update.effective_message.photo:
+            context.user_data.pop("awaiting_getpin_ss", None)
+            
+            admin_ids = await db.list_admin_ids()
+            targets = {config.OWNER_ID, *admin_ids}
+            
+            kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Order Completed", callback_data=f"done:{user_id}"),
+                    InlineKeyboardButton("🚫 Ban User", callback_data=f"ban:{user_id}")
+                ]
+            ])
+            
+            # Send photo to admins
+            photo_file_id = update.effective_message.photo[-1].file_id
+            for aid in targets:
+                if aid:
+                    try:
+                        await context.bot.send_photo(
+                            chat_id=aid,
+                            photo=photo_file_id,
+                            caption=f"📸 <b>Getpin Screenshot Received</b>\nUser ID: <code>{user_id}</code>",
+                            reply_markup=kb,
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+                        
+            await update.effective_message.reply_text("✅ Screenshot mil gayi! Admin verify karke jald hi order complete karenge.")
+        else:
+            await update.effective_message.reply_text("⚠️ Please send the getpin page screenshot as a photo.")
+        return

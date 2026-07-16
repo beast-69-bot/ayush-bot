@@ -1,0 +1,16 @@
+# Environment secrets
+.env
+
+# Databases
+*.db
+premium_store.db
+
+# Python cache & compiler files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE folders
+.vscode/
+.idea/

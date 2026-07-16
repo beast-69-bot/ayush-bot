@@ -1,0 +1,61 @@
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    PreCheckoutQueryHandler,
+    filters
+)
+from handlers.commands import start, plan_menu, make_admin, details, pay_lookup, cmd_settings
+from handlers.callbacks import (
+    pay_callback, pay_cancel_callback, pay_utr_callback, pay_admin_callback,
+    my_orders_callback, settings_gw_callback, settings_field_callback,
+    info_screens_callback, rc_menu_callback, report_issue_callback,
+    contact_admin_callback, back_main_callback,
+    pre_checkout_callback, successful_payment_callback,
+    generic_done_callback, generic_ban_callback, generic_reply_callback
+)
+from handlers.messages import handle_incoming_messages
+
+def register_all_handlers(app: Application) -> None:
+    # 1. Command Handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("plan", plan_menu))
+    app.add_handler(CommandHandler("pay", plan_menu))
+    app.add_handler(CommandHandler("makeadmin", make_admin))
+    app.add_handler(CommandHandler("details", details))
+    app.add_handler(CommandHandler("paylookup", pay_lookup))
+    app.add_handler(CommandHandler("settings", cmd_settings))
+    app.add_handler(CommandHandler("setpay", cmd_settings))
+
+    # 2. Callback Query Handlers
+    app.add_handler(CallbackQueryHandler(info_screens_callback, pattern=r"^info_"))
+    app.add_handler(CallbackQueryHandler(pay_callback, pattern=r"^payplan:"))
+    app.add_handler(CallbackQueryHandler(pay_cancel_callback, pattern=r"^paycancel:"))
+    app.add_handler(CallbackQueryHandler(pay_utr_callback, pattern=r"^payutr:"))
+    app.add_handler(CallbackQueryHandler(pay_admin_callback, pattern=r"^payadm:"))
+    app.add_handler(CallbackQueryHandler(my_orders_callback, pattern=r"^my_orders$"))
+    app.add_handler(CallbackQueryHandler(rc_menu_callback, pattern=r"^rc_menu$"))
+    app.add_handler(CallbackQueryHandler(report_issue_callback, pattern=r"^report_issue$"))
+    app.add_handler(CallbackQueryHandler(contact_admin_callback, pattern=r"^contact_admin$"))
+    app.add_handler(CallbackQueryHandler(back_main_callback, pattern=r"^back_main$"))
+    
+    # Settings callbacks
+    app.add_handler(CallbackQueryHandler(settings_gw_callback, pattern=r"^settings_gw:"))
+    app.add_handler(CallbackQueryHandler(settings_field_callback, pattern=r"^settings_field:"))
+    
+    # Generic admin action callbacks
+    app.add_handler(CallbackQueryHandler(generic_done_callback, pattern=r"^done:"))
+    app.add_handler(CallbackQueryHandler(generic_ban_callback, pattern=r"^ban:"))
+    app.add_handler(CallbackQueryHandler(generic_reply_callback, pattern=r"^reply:"))
+
+    # 3. Telegram Stars checkout handlers
+    app.add_handler(PreCheckoutQueryHandler(pre_checkout_callback))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
+
+    # 4. Message Handlers (handles text, photo, and documents)
+    # Ignore commands and successful payments which are handled above
+    app.add_handler(MessageHandler(
+        (filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND & ~filters.SUCCESSFUL_PAYMENT,
+        handle_incoming_messages
+    ))
