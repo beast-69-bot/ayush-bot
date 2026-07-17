@@ -696,13 +696,18 @@ async def info_screens_callback(update: Update, context: ContextTypes.DEFAULT_TY
     elif data == 'info_faphouse':
         text = (
             "🔥 <b>Faphouse Paid VIP</b>\n\n"
+            "✨ <b>SPECIAL LIMITED TIME OFFER!</b> ✨\n"
+            "⚠️ <i>Grab this opportunity without missing it!</i> ⚠️\n\n"
             "Get Faphouse paid mod (No getpin needed).\n"
-            "🔗 After payment, you will get a one-time group link to join.\n\n"
+            "🔗 After payment, you will get a one-time group link to join and your license key.\n\n"
             "Select subscription duration:"
         )
         kb.append([
-            InlineKeyboardButton("🔥 3 Days (₹15)", callback_data="payplan:faphouse_3"),
-            InlineKeyboardButton("🔥 7 Days (₹25)", callback_data="payplan:faphouse_7")
+            InlineKeyboardButton("🔥 1 Day (₹9)", callback_data="payplan:faphouse_1")
+        ])
+        kb.append([
+            InlineKeyboardButton("🔥 3 Days (₹19)", callback_data="payplan:faphouse_3"),
+            InlineKeyboardButton("🔥 7 Days (₹29)", callback_data="payplan:faphouse_7")
         ])
     elif data == 'info_donation':
         text = (

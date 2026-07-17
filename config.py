@@ -40,19 +40,27 @@ PAY_PLANS = {
         "sub_type": "getpin",
         "chat_id": None
     },
+    "faphouse_1": {
+        "label": "Faphouse Paid (1 Day)",
+        "days": 1,
+        "amount": 9,
+        "stars": 9,
+        "sub_type": "faphouse",
+        "chat_id": GROUP_ID
+    },
     "faphouse_3": {
         "label": "Faphouse Paid (3 Days)",
         "days": 3,
-        "amount": 15,
-        "stars": 15,
+        "amount": 19,
+        "stars": 19,
         "sub_type": "faphouse",
         "chat_id": GROUP_ID
     },
     "faphouse_7": {
         "label": "Faphouse Paid (7 Days)",
         "days": 7,
-        "amount": 25,
-        "stars": 25,
+        "amount": 29,
+        "stars": 29,
         "sub_type": "faphouse",
         "chat_id": GROUP_ID
     },
