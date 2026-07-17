@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faphouse Premium</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #050505;
+            --glass: rgba(255, 255, 255, 0.02);
+            --border: rgba(255, 215, 0, 0.15);
+            --accent: #FFD700;
+            --accent-gradient: linear-gradient(135deg, #FFD700, #FDB931);
+            --accent-glow: rgba(255, 215, 0, 0.25);
+            --text-main: #ffffff;
+            --text-muted: #666666;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body {
+            margin: 0; padding: 0; font-family: 'Outfit', sans-serif;
+            background: var(--bg-dark);
+            background-image: radial-gradient(circle at 50% 0%, rgba(255, 215, 0, 0.1) 0%, transparent 50%), linear-gradient(0deg, #050505 0%, #0a0a0a 100%);
+            height: 100vh; display: flex; justify-content: center; align-items: center;
+            color: var(--text-main); overflow: hidden; position: relative;
+        }
+        body::before {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-image: linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+            background-size: 40px 40px; z-index: 0; pointer-events: none;
+        }
+        .premium-card {
+            background: var(--glass); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+            border: 1px solid var(--border); border-radius: 28px; padding: 48px 36px; width: 90%; max-width: 380px;
+            text-align: center; box-shadow: 0 30px 60px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.05);
+            position: relative; z-index: 10; overflow: hidden; animation: fadeInUp 1s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .premium-card::after {
+            content: ''; position: absolute; top: 0; left: 10%; right: 10%; height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent); box-shadow: 0 0 10px var(--accent);
+        }
+        .logo-icon {
+            width: 72px; height: 72px; margin: 0 auto 24px; background: rgba(255, 215, 0, 0.05);
+            border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 0 30px var(--accent-glow); position: relative;
+        }
+        .logo-icon svg { width: 32px; height: 32px; fill: var(--accent); filter: drop-shadow(0 0 5px var(--accent)); }
+        h2 {
+            margin: 0 0 8px 0; font-weight: 900; font-size: 26px; letter-spacing: -0.5px; text-transform: uppercase;
+            background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 32px; font-weight: 300; letter-spacing: 0.5px; }
+        .input-group { position: relative; margin-bottom: 24px; }
+        input {
+            width: 100%; padding: 18px 20px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 14px; color: var(--text-main); text-align: center; font-size: 16px; font-family: 'Outfit', sans-serif;
+            letter-spacing: 2px; font-weight: 500; outline: none; transition: all 0.3s ease;
+        }
+        input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(255, 215, 0, 0.1); background: rgba(0,0,0,0.6); }
+        input::placeholder { color: #444; font-weight: 300; letter-spacing: 1px; }
+        button {
+            width: 100%; padding: 18px; background: var(--accent-gradient); color: #000; border: none; border-radius: 14px;
+            font-size: 16px; font-weight: 700; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 10px 25px var(--accent-glow);
+            font-family: 'Outfit', sans-serif; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; justify-content: center; height: 56px;
+        }
+        button:active { transform: scale(0.97); box-shadow: 0 5px 15px var(--accent-glow); }
+        button:disabled { opacity: 0.7; cursor: not-allowed; }
+        .spinner { width: 20px; height: 20px; border: 3px solid rgba(0,0,0,0.3); border-radius: 50%; border-top-color: #000; animation: spin 1s linear infinite; }
+        .hidden { display: none; }
+        #timer { font-size: 40px; font-weight: 700; margin: 24px 0; color: var(--accent); text-shadow: 0 0 20px var(--accent-glow); font-variant-numeric: tabular-nums; letter-spacing: 2px; }
+        .error { color: #ff4d4d; margin-top: 16px; font-size: 13px; font-weight: 500; min-height: 20px; }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; background: rgba(255, 215, 0, 0.1); border: 1px solid var(--accent); border-radius: 30px; font-size: 11px; color: var(--accent); font-weight: 700; letter-spacing: 2px; margin-bottom: 20px; text-transform: uppercase; }
+        .status-badge::before { content: ''; width: 6px; height: 6px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 10px var(--accent); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="premium-card" id="loginBox">
+        <div class="logo-icon">
+            <svg viewBox="0 0 24 24"><path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/></svg>
+        </div>
+        <h2>Premium Access</h2>
+        <div class="subtitle">Verify your license key to continue</div>
+        <div class="input-group">
+            <input type="text" id="keyInput" placeholder="XXXX-XXXX-XXXX" autocomplete="off">
+        </div>
+        <button id="unlockBtn" onclick="checkKey()">Unlock Premium</button>
+        <div id="errorMsg" class="error"></div>
+    </div>
+
+    <div class="premium-card hidden" id="timerBox">
+        <div class="status-badge">Active</div>
+        <h2>Welcome Back</h2>
+        <div class="subtitle">Your premium access expires in</div>
+        <div id="timer">00:00:00</div>
+        <button id="enterAppBtn" onclick="continueToApp()">Enter Faphouse</button>
+    </div>
+
+    <script>
+        let deviceId = localStorage.getItem('fh_device_id');
+        if (!deviceId) {
+            deviceId = 'dev_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+            localStorage.setItem('fh_device_id', deviceId);
+        }
+
+        window.onload = function() {
+            let savedKey = localStorage.getItem('fh_key');
+            if (savedKey) {
+                document.getElementById("keyInput").value = savedKey;
+                verifyKey(savedKey, true);
+            }
+        };
+
+        function checkKey() {
+            let key = document.getElementById("keyInput").value.trim();
+            document.getElementById("errorMsg").innerText = "";
+            if(key) verifyKey(key, false);
+        }
+
+        function verifyKey(key, isAutoLogin) {
+            const btn = document.getElementById('unlockBtn');
+            if(!isAutoLogin) {
+                btn.innerHTML = '<div class="spinner"></div>';
+                btn.disabled = true;
+            }
+            
+            let apiBase = "http://140.245.107.220:5000";
+            if (window.location.protocol.startsWith('http')) {
+                apiBase = window.location.origin;
+            }
+            let apiUrl = `${apiBase}/verify_key?key=${encodeURIComponent(key)}&device_id=${deviceId}`;
+            
+            fetch(apiUrl)
+            .then(response => response.json())
+            .then(data => {
+                if(data.status === "valid") {
+                    localStorage.setItem('fh_key', key);
+                    document.getElementById("loginBox").classList.add('hidden');
+                    document.getElementById("timerBox").classList.remove('hidden');
+                    startCountdown(data.expiry);
+                } else {
+                    localStorage.removeItem('fh_key');
+                    document.getElementById("loginBox").classList.remove('hidden');
+                    document.getElementById("timerBox").classList.add('hidden');
+                    document.getElementById("errorMsg").innerText = "❌ " + data.message;
+                    btn.innerHTML = 'Unlock Premium';
+                    btn.disabled = false;
+                }
+            })
+            .catch(error => {
+                document.getElementById("errorMsg").innerText = "⚠️ Network Error.";
+                btn.innerHTML = 'Unlock Premium';
+                btn.disabled = false;
+            });
+        }
+
+        function startCountdown(expiryDateStr) {
+            const expiryDate = new Date(expiryDateStr).getTime();
+            const timerElem = document.getElementById('timer');
+            
+            const interval = setInterval(function() {
+                const now = new Date().getTime();
+                const distance = expiryDate - now;
+                
+                if (distance < 0) {
+                    clearInterval(interval);
+                    timerElem.innerHTML = "EXPIRED";
+                    localStorage.removeItem('fh_key');
+                    setTimeout(() => location.reload(), 2000);
+                    return;
+                }
+                
+                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+                
+                timerElem.innerHTML = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+            }, 1000);
+        }
+
+        function continueToApp() {
+            let key = localStorage.getItem('fh_key');
+            if(!key) return;
+            
+            const btn = document.getElementById('enterAppBtn');
+            btn.innerHTML = '<div class="spinner"></div>';
+            btn.disabled = true;
+
+            let apiBase = "http://140.245.107.220:5000";
+            if (window.location.protocol.startsWith('http')) {
+                apiBase = window.location.origin;
+            }
+
+            fetch(`${apiBase}/get_ott?key=${encodeURIComponent(key)}`)
+            .then(res => res.json())
+            .then(data => {
+                if(data.status === "success") {
+                    // Redirect to Proxy with OTT in URL (Safe, 15s expiry)
+                    window.location.href = "http://tv.modsdone.in/?ott=" + data.token;
+                } else {
+                    alert("Error getting auth token. Try again.");
+                    btn.innerHTML = 'Enter Faphouse';
+                    btn.disabled = false;
+                }
+            })
+            .catch(err => {
+                alert("Network error while authenticating.");
+                btn.innerHTML = 'Enter Faphouse';
+                btn.disabled = false;
+            });
+        }
+    </script>
+</body>
+</html>

@@ -82,8 +82,8 @@ async def _activate_payment_plan(db: Database, req: dict, bot, context: ContextT
             
             # Custom invite link duration (days of plan for faphouse)
             if plan_key.startswith("faphouse"):
-                expire_seconds = days * 24 * 60 * 60
-                validity_desc = f"{days} Days"
+                expire_seconds = 600
+                validity_desc = "10 minutes"
             else:
                 expire_seconds = 600
                 validity_desc = "10 minutes"
@@ -94,12 +94,25 @@ async def _activate_payment_plan(db: Database, req: dict, bot, context: ContextT
                 member_limit=1,
                 expire_date=int(time.time()) + expire_seconds
             )
-            success_msg = (
-                f"🎉 Welcome to premium VIP!\n\n"
-                f"Here is your join link (valid for {validity_desc}, one-time use):\n"
-                f"🔗 {invite_link.invite_link}"
-            )
-            await bot.send_message(chat_id=user_id, text=success_msg)
+            
+            if plan_key.startswith("faphouse"):
+                key = await db.generate_faphouse_key(user_id, days)
+                success_msg = (
+                    "🎉 <b>Welcome to Faphouse Paid VIP!</b>\n\n"
+                    f"🔗 <b>Group Join Link (Valid for {validity_desc}, one-time use):</b>\n"
+                    f"{invite_link.invite_link}\n\n"
+                    f"🔑 <b>License Key:</b>\n"
+                    f"<code>{key}</code>\n\n"
+                    "📝 <b>Instructions:</b>\n"
+                    "Group join karke wahan se APK download aur install karein. Uske baad open karke upar di gayi key enter karein."
+                )
+            else:
+                success_msg = (
+                    f"🎉 Welcome to premium VIP!\n\n"
+                    f"Here is your join link (valid for {validity_desc}, one-time use):\n"
+                    f"🔗 {invite_link.invite_link}"
+                )
+            await bot.send_message(chat_id=user_id, text=success_msg, parse_mode="HTML")
         except Exception as e:
             print(f"Error unbanning user or creating invite link: {e}")
             await bot.send_message(
@@ -601,19 +614,28 @@ async def my_orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     until = await db.get_premium_until(user_id)
     now = int(time.time())
     
-    if until > now:
-        expiry_str = datetime.datetime.utcfromtimestamp(until).strftime("%Y-%m-%d %H:%M:%S UTC")
-        text = (
-            "📦 <b>My Premium Subscriptions</b>\n\n"
-            f"👑 Status: <b>VIP Premium Member</b>\n"
-            f"⏳ Expiry Date: <code>{expiry_str}</code>"
-        )
-    else:
+    active_keys = await db.get_active_user_keys(user_id)
+    
+    has_active_premium = until > now
+    
+    if not has_active_premium and not active_keys:
         text = (
             "📦 <b>My Premium Subscriptions</b>\n\n"
             "Aapke paas abhi koi active premium plan nahi hai.\n"
             "Kripya main menu ya /plan command se purchase karein."
         )
+    else:
+        text = "📦 <b>My Active Orders</b>\n\n"
+        if has_active_premium:
+            expiry_str = datetime.datetime.utcfromtimestamp(until).strftime("%Y-%m-%d %H:%M:%S UTC")
+            text += (
+                f"👑 Status: <b>VIP Premium Member</b>\n"
+                f"⏳ Expiry Date: <code>{expiry_str}</code>\n\n"
+            )
+        if active_keys:
+            text += "🔑 <b>Your Faphouse Keys:</b>\n"
+            for k in active_keys:
+                text += f"• <code>{k['key']}</code> (Exp: <code>{k['expiry_date']}</code>)\n"
         
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_main")]])
     await q.edit_message_text(text=text, reply_markup=kb, parse_mode="HTML")

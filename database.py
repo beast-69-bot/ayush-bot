@@ -99,6 +99,20 @@ class Database:
               updated_at    INTEGER NOT NULL,
               processed_by  INTEGER
             );
+
+            CREATE TABLE IF NOT EXISTS apk_keys (
+              key           TEXT PRIMARY KEY,
+              user_id       INTEGER,
+              expiry_date   TEXT,
+              is_active     INTEGER,
+              devices       TEXT DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+              token         TEXT PRIMARY KEY,
+              key           TEXT,
+              expiry        REAL
+            );
             """
         )
         await self.conn.commit()
@@ -281,11 +295,42 @@ class Database:
             "INSERT OR IGNORE INTO bot_bans(user_id, banned_at) VALUES(?, ?)",
             (int(user_id), now)
         )
+        await self.conn.execute(
+            "UPDATE apk_keys SET is_active=0 WHERE user_id=?",
+            (int(user_id),)
+        )
         await self.conn.commit()
 
     async def unban_from_bot(self, user_id: int) -> None:
         await self.conn.execute("DELETE FROM bot_bans WHERE user_id=?", (int(user_id),))
         await self.conn.commit()
+
+    # Faphouse License Keys
+    async def generate_faphouse_key(self, user_id: int, plan_days: int) -> str:
+        import random
+        import string
+        from datetime import datetime, timedelta
+        
+        chars = string.ascii_uppercase + string.digits
+        key = "FAPH-" + '-'.join(''.join(random.choices(chars, k=4)) for _ in range(3))
+        expiry = (datetime.now() + timedelta(days=plan_days)).strftime('%Y-%m-%d %H:%M:%S')
+        
+        await self.conn.execute(
+            "INSERT INTO apk_keys (key, user_id, expiry_date, is_active, devices) VALUES (?, ?, ?, 1, '')",
+            (key, int(user_id), expiry)
+        )
+        await self.conn.commit()
+        return key
+
+    async def get_active_user_keys(self, user_id: int) -> list[dict[str, Any]]:
+        from datetime import datetime
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        async with self.conn.execute(
+            "SELECT key, expiry_date, is_active FROM apk_keys WHERE user_id=? AND is_active=1 AND expiry_date > ?",
+            (int(user_id), now_str)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [{"key": r[0], "expiry_date": r[1], "is_active": r[2]} for r in rows]
 
     # Reports
     async def add_report(self, user_id: int, timestamp: float) -> None:

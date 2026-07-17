@@ -20,6 +20,8 @@ UPI_ID = os.getenv("UPI_ID", "agpriyanshu21@fam")
 RZP_KEY_ID = os.getenv("RZP_KEY_ID", "rzp_live_SunwtsWUJuxPoe")
 RZP_KEY_SECRET = os.getenv("RZP_KEY_SECRET", "bJ7AXzblK03QVXiON85qhYFv")
 
+FAPHOUSE_APK_LINK = os.getenv("FAPHOUSE_APK_LINK", "https://dupload.net/emnp0ca53qne")
+
 # Unified Plans (Prices, Durations, Type and Destination Chats)
 PAY_PLANS = {
     "direct": {
