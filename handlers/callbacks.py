@@ -681,25 +681,37 @@ async def info_screens_callback(update: Update, context: ContextTypes.DEFAULT_TY
     q = update.callback_query
     await q.answer()
     
+    db: Database = context.application.bot_data["db"]
+    plans = await db.get_active_plans()
+    
     data = q.data or ""
     kb = []
     
     if data == 'info_direct':
+        p = plans.get("direct", {})
+        p_amount = p.get("amount", 35)
+        p_stars = p.get("stars", 35)
         text = (
             "🎮 <b>Direct Mods (1 Month)</b>\n\n"
             "Get direct access to our Premium Private Channel for 1 month.\n\n"
-            "<b>Price: ₹35 / 35 Stars ⭐</b>"
+            f"<b>Price: ₹{p_amount} / {p_stars} Stars ⭐</b>"
         )
         kb.append([InlineKeyboardButton("💳 Buy VIP access", callback_data="payplan:direct")])
     elif data == 'info_getpin':
+        p = plans.get("getpin", {})
+        p_amount = p.get("amount", 30)
+        p_stars = p.get("stars", 30)
         text = (
             "🚫 <b>No Getpin (1 Month)</b>\n\n"
             "Remove getpin for 1 month for any ONE Apk.\n\n"
             "⚠️ <b>After payment, open the apk, go to the getpin page, take a screenshot, and send it here.</b>\n\n"
-            "<b>Price: ₹30 / 30 Stars ⭐</b>"
+            f"<b>Price: ₹{p_amount} / {p_stars} Stars ⭐</b>"
         )
         kb.append([InlineKeyboardButton("💳 Buy VIP access", callback_data="payplan:getpin")])
     elif data == 'info_faphouse':
+        p1 = plans.get("faphouse_1", {})
+        p3 = plans.get("faphouse_3", {})
+        p7 = plans.get("faphouse_7", {})
         text = (
             "🔥 <b>Faphouse Paid VIP</b>\n\n"
             "✨ <b>SPECIAL LIMITED TIME OFFER!</b> ✨\n"
@@ -709,17 +721,20 @@ async def info_screens_callback(update: Update, context: ContextTypes.DEFAULT_TY
             "Select subscription duration:"
         )
         kb.append([
-            InlineKeyboardButton("🔥 1 Day (₹9)", callback_data="payplan:faphouse_1")
+            InlineKeyboardButton(f"🔥 1 Day (₹{p1.get('amount', 9)})", callback_data="payplan:faphouse_1")
         ])
         kb.append([
-            InlineKeyboardButton("🔥 3 Days (₹19)", callback_data="payplan:faphouse_3"),
-            InlineKeyboardButton("🔥 7 Days (₹29)", callback_data="payplan:faphouse_7")
+            InlineKeyboardButton(f"🔥 3 Days (₹{p3.get('amount', 19)})", callback_data="payplan:faphouse_3"),
+            InlineKeyboardButton(f"🔥 7 Days (₹{p7.get('amount', 29)})", callback_data="payplan:faphouse_7")
         ])
     elif data == 'info_donation':
+        p = plans.get("donation", {})
+        p_amount = p.get("amount", 1)
+        p_stars = p.get("stars", 1)
         text = (
             "❤️ <b>Test Donation (₹1 / 1 Star)</b> ❤️\n\n"
             "Support our development and test the Razorpay/Stars auto-verification flows.\n\n"
-            "<b>Price: ₹1 / 1 Star ⭐</b>"
+            f"<b>Price: ₹{p_amount} / {p_stars} Star ⭐</b>"
         )
         kb.append([InlineKeyboardButton("💳 Donate now", callback_data="payplan:donation")])
         
