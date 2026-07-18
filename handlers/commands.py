@@ -86,7 +86,8 @@ async def plan_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, message_
     keyboard = []
     text = "💎 <b>Elite Premium Store VIP Plans</b> 💎\n\nSelect a VIP plan to upgrade:\n\n"
     
-    for plan_key, plan in config.PAY_PLANS.items():
+    plans = await db.get_active_plans()
+    for plan_key, plan in plans.items():
         text += f"• <b>{plan['label']}</b>:\n"
         text += f"  💰 Price: ₹{plan['amount']} / {plan['stars']} Stars ⭐\n\n"
         
@@ -179,10 +180,11 @@ async def details(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
         
     text = f"📊 <b>Payment Details ({html.escape(time_str)})</b>\n\n"
+    plans = await db.get_active_plans()
     total = 0
     for p in payments:
         proc_date = datetime.datetime.utcfromtimestamp(p['processed_at']).strftime('%Y-%m-%d %H:%M:%S UTC')
-        plan = config.PAY_PLANS.get(p['plan_key'], {"label": p['plan_key']})
+        plan = plans.get(p['plan_key'], {"label": p['plan_key']})
         plan_name = plan.get("label", p['plan_key'])
         text += f"• <code>{proc_date}</code> | User: <code>{p['user_id']}</code> | ₹{p['amount_rs']} | {html.escape(plan_name)}\n"
         total += p['amount_rs']
@@ -256,6 +258,9 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, mess
         [
             InlineKeyboardButton("Change Razorpay Key ID", callback_data="settings_field:razorpay_key_id"),
             InlineKeyboardButton("Change Razorpay Secret", callback_data="settings_field:razorpay_key_secret")
+        ],
+        [
+            InlineKeyboardButton("🏷 Edit Plan Prices", callback_data="admin_edit_plans_menu")
         ],
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")

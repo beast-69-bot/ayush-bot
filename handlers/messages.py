@@ -19,6 +19,77 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
     if await db.is_bot_banned(user_id):
         return
 
+    # 1bb. Admin Plan Modification Handler
+    edit_plan_key = context.user_data.get("edit_plan_key")
+    if edit_plan_key:
+        if not await db.is_admin(user_id):
+            return
+            
+        txt = (update.effective_message.text or "").strip()
+        field = context.user_data.get("edit_plan_field")
+        menu_msg_id = context.user_data.get("edit_plan_msg_id")
+        
+        if txt.lower() == "cancel":
+            context.user_data.pop("edit_plan_key", None)
+            context.user_data.pop("edit_plan_field", None)
+            context.user_data.pop("edit_plan_msg_id", None)
+            await update.effective_message.reply_text("❌ Modification cancelled.")
+            from handlers.callbacks import admin_edit_plan_select_callback
+            class FakeQuery:
+                def __init__(self, data, msg):
+                    self.data = data
+                    self.message = msg
+                async def answer(self, *args, **kwargs):
+                    pass
+                async def edit_message_text(self, *args, **kwargs):
+                    kwargs["message_id"] = menu_msg_id
+                    kwargs["chat_id"] = update.effective_chat.id
+                    await context.bot.edit_message_text(*args, **kwargs)
+            fake_update = Update(update.update_id)
+            fake_update._effective_chat = update.effective_chat
+            fake_update._effective_user = update.effective_user
+            fake_update.callback_query = FakeQuery(f"admin_edit_plan_select:{edit_plan_key}", update.effective_message)
+            await admin_edit_plan_select_callback(fake_update, context)
+            return
+            
+        try:
+            val = int(txt)
+            if val <= 0:
+                raise ValueError()
+        except ValueError:
+            await update.effective_message.reply_text("⚠️ Please enter a valid positive integer.")
+            return
+            
+        context.user_data.pop("edit_plan_key", None)
+        context.user_data.pop("edit_plan_field", None)
+        context.user_data.pop("edit_plan_msg_id", None)
+        
+        # Save to settings in database
+        db_key = f"plan_price:{edit_plan_key}" if field == "amount" else f"plan_stars:{edit_plan_key}"
+        await db.set_setting(db_key, str(val))
+        
+        field_label = "Price (₹)" if field == "amount" else "Stars count (⭐)"
+        await update.effective_message.reply_html(f"✅ Plan <code>{edit_plan_key}</code> key's <b>{field_label}</b> updated successfully to <b>{val}</b>!")
+        
+        # Show updated plan menu
+        from handlers.callbacks import admin_edit_plan_select_callback
+        class FakeQuery:
+            def __init__(self, data, msg):
+                self.data = data
+                self.message = msg
+            async def answer(self, *args, **kwargs):
+                pass
+            async def edit_message_text(self, *args, **kwargs):
+                kwargs["message_id"] = menu_msg_id
+                kwargs["chat_id"] = update.effective_chat.id
+                await context.bot.edit_message_text(*args, **kwargs)
+        fake_update = Update(update.update_id)
+        fake_update._effective_chat = update.effective_chat
+        fake_update._effective_user = update.effective_user
+        fake_update.callback_query = FakeQuery(f"admin_edit_plan_select:{edit_plan_key}", update.effective_message)
+        await admin_edit_plan_select_callback(fake_update, context)
+        return
+
     # 1b. Admin Broadcast Handler
     if context.user_data.get("awaiting_broadcast"):
         if not await db.is_admin(user_id):

@@ -705,3 +705,29 @@ class Database:
         await cur.close()
         return int(row[0]) if row and row[0] is not None else 0
 
+    async def get_active_plans(self) -> dict[str, Any]:
+        import config
+        import copy
+        plans = {}
+        for plan_key, plan_val in config.PAY_PLANS.items():
+            plan_copy = copy.deepcopy(plan_val)
+            
+            # Check price override
+            price_override = await self.get_setting(f"plan_price:{plan_key}")
+            if price_override is not None:
+                try:
+                    plan_copy["amount"] = int(price_override)
+                except ValueError:
+                    pass
+                    
+            # Check stars override
+            stars_override = await self.get_setting(f"plan_stars:{plan_key}")
+            if stars_override is not None:
+                try:
+                    plan_copy["stars"] = int(stars_override)
+                except ValueError:
+                    pass
+                    
+            plans[plan_key] = plan_copy
+        return plans
+

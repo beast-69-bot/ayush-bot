@@ -34,7 +34,8 @@ def _upi_qr_image_url(upi_uri: str) -> str:
 # Activate plan helper
 async def _activate_payment_plan(db: Database, req: dict, bot, context: ContextTypes.DEFAULT_TYPE = None) -> int:
     plan_key = str(req.get("plan_key") or "")
-    plan = config.PAY_PLANS.get(plan_key, {})
+    plans = await db.get_active_plans()
+    plan = plans.get(plan_key, {})
     days = int(req.get("plan_days") or 30)
     user_id = int(req["user_id"])
     
@@ -178,7 +179,9 @@ async def _update_payment_user_status(
     if not chat_id or not message_id:
         return
         
-    plan = config.PAY_PLANS.get(req['plan_key'], {"label": req['plan_key']})
+    db = context.application.bot_data["db"]
+    plans = await db.get_active_plans()
+    plan = plans.get(req['plan_key'], {"label": req['plan_key']})
     plan_label = plan.get("label", req['plan_key'])
     
     status_html = [
@@ -304,7 +307,9 @@ async def _poll_razorpay_and_complete(
         )
         
         # User notification card
-        plan = config.PAY_PLANS.get(req['plan_key'], {"label": req['plan_key']})
+        db = context.application.bot_data["db"]
+        plans = await db.get_active_plans()
+        plan = plans.get(req['plan_key'], {"label": req['plan_key']})
         plan_name = plan.get("label", req['plan_key'])
         
         if req['plan_key'] == "donation":
@@ -366,7 +371,8 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         
     data = q.data or ""
     plan_key = data.split(":")[1]
-    plan = config.PAY_PLANS.get(plan_key)
+    plans = await db.get_active_plans()
+    plan = plans.get(plan_key)
     if not plan:
         await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Invalid plan.")
         return
@@ -874,7 +880,8 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
     )
     
     try:
-        plan = config.PAY_PLANS.get(req['plan_key'], {"label": req['plan_key']})
+        plans = await db.get_active_plans()
+        plan = plans.get(req['plan_key'], {"label": req['plan_key']})
         plan_name = plan.get("label", req['plan_key'])
         
         if req.get("plan_key") == "donation":
@@ -1053,8 +1060,9 @@ async def admin_orders_menu_callback(update: Update, context: ContextTypes.DEFAU
     )
     
     keyboard = []
+    plans = await db.get_active_plans()
     for r in recent:
-        plan = config.PAY_PLANS.get(r['plan_key'], {"label": r['plan_key']})
+        plan = plans.get(r['plan_key'], {"label": r['plan_key']})
         plan_label = plan.get("label", r['plan_key'])
         status_emoji = {
             "processed": "✅",
@@ -1152,7 +1160,8 @@ async def admin_revenue_menu_callback(update: Update, context: ContextTypes.DEFA
     
     # Plans
     plan_revenue = {}
-    for plan_key in config.PAY_PLANS.keys():
+    plans = await db.get_active_plans()
+    for plan_key in plans.keys():
         plan_revenue[plan_key] = 0
         
     for p in payments:
@@ -1212,7 +1221,7 @@ async def admin_revenue_menu_callback(update: Update, context: ContextTypes.DEFA
     )
     
     for pk, rev in plan_revenue.items():
-        plan = config.PAY_PLANS.get(pk, {"label": pk})
+        plan = plans.get(pk, {"label": pk})
         label = plan.get("label", pk)
         text += f"• {label}: ₹{rev}\n"
         
@@ -1369,7 +1378,8 @@ async def pay_gw_choice_callback(update: Update, context: ContextTypes.DEFAULT_T
     plan_key = parts[1]
     gw_choice = parts[2]
     
-    plan = config.PAY_PLANS.get(plan_key)
+    plans = await db.get_active_plans()
+    plan = plans.get(plan_key)
     if not plan:
         return
         
@@ -1736,6 +1746,113 @@ async def withdraw_done_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
     except Exception:
         pass
+
+async def admin_edit_plans_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    plans = await db.get_active_plans()
+    
+    text = (
+        "🏷 <b>Edit Product/Plan Prices & Stars</b>\n\n"
+        "Niche diye gaye plans me se kisi ek ko select karein jiska price ya stars aap change karna chahte hain:"
+    )
+    
+    keyboard = []
+    for plan_key, plan in plans.items():
+        keyboard.append([
+            InlineKeyboardButton(
+                f"📝 {plan['label']} (₹{plan['amount']} / {plan.get('stars', plan['amount'])} ⭐)",
+                callback_data=f"admin_edit_plan_select:{plan_key}"
+            )
+        ])
+        
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back to Config Settings", callback_data="settings_main")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def admin_edit_plan_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    data = q.data or ""
+    plan_key = data.split(":")[1]
+    
+    plans = await db.get_active_plans()
+    plan = plans.get(plan_key)
+    if not plan:
+        await q.answer("Plan not found", show_alert=True)
+        return
+        
+    text = (
+        f"⚙️ <b>Modify Plan: {plan['label']}</b>\n\n"
+        f"• <b>Plan Key:</b> <code>{plan_key}</code>\n"
+        f"• <b>Current Price:</b> ₹{plan['amount']}\n"
+        f"• <b>Current Stars:</b> {plan.get('stars', plan['amount'])} Stars ⭐\n\n"
+        "Aap is plan ke liye kya update karna chahte hain?"
+    )
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("Change Price (₹)", callback_data=f"admin_edit_plan_field:{plan_key}:amount"),
+            InlineKeyboardButton("Change Stars (⭐)", callback_data=f"admin_edit_plan_field:{plan_key}:stars")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back to Plans List", callback_data="admin_edit_plans_menu")
+        ]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def admin_edit_plan_field_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    data = q.data or ""
+    parts = data.split(":")
+    plan_key = parts[1]
+    field = parts[2] # "amount" or "stars"
+    
+    context.user_data["edit_plan_key"] = plan_key
+    context.user_data["edit_plan_field"] = field
+    context.user_data["edit_plan_msg_id"] = q.message.message_id
+    
+    field_label = "Price in Rupees (₹)" if field == "amount" else "Stars count (⭐)"
+    
+    text = (
+        f"✍️ <b>Update Plan:</b> <code>{plan_key}</code>\n\n"
+        f"Please enter the new value for <b>{field_label}</b>:\n"
+        f"• Send a positive number (e.g. <code>50</code>)\n"
+        f"• Cancel karne ke liye type karein: <code>cancel</code>"
+    )
+    
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        parse_mode="HTML"
+    )
 
 
 
