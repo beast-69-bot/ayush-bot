@@ -52,24 +52,46 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
             await admin_edit_plan_select_callback(fake_update, context)
             return
             
-        try:
-            val = int(txt)
-            if val <= 0:
-                raise ValueError()
-        except ValueError:
-            await update.effective_message.reply_text("⚠️ Please enter a valid positive integer.")
-            return
-            
+        is_limit_remove = False
+        val = None
+        if field == "limit":
+            if txt.lower() in ("none", "unlimited", "0", "remove"):
+                is_limit_remove = True
+            else:
+                try:
+                    val = int(txt)
+                    if val <= 0:
+                        raise ValueError()
+                except ValueError:
+                    await update.effective_message.reply_text("⚠️ Please enter a valid positive integer limit, or send 'none' to remove it.")
+                    return
+        else:
+            try:
+                val = int(txt)
+                if val <= 0:
+                    raise ValueError()
+            except ValueError:
+                await update.effective_message.reply_text("⚠️ Please enter a valid positive integer.")
+                return
+                
         context.user_data.pop("edit_plan_key", None)
         context.user_data.pop("edit_plan_field", None)
         context.user_data.pop("edit_plan_msg_id", None)
         
         # Save to settings in database
-        db_key = f"plan_price:{edit_plan_key}" if field == "amount" else f"plan_stars:{edit_plan_key}"
-        await db.set_setting(db_key, str(val))
-        
-        field_label = "Price (₹)" if field == "amount" else "Stars count (⭐)"
-        await update.effective_message.reply_html(f"✅ Plan <code>{edit_plan_key}</code> key's <b>{field_label}</b> updated successfully to <b>{val}</b>!")
+        if field == "limit":
+            db_key = f"plan_limit:{edit_plan_key}"
+            if is_limit_remove:
+                await db.set_setting(db_key, None)
+                await update.effective_message.reply_html(f"✅ Plan <code>{edit_plan_key}</code> limit has been <b>removed</b> (Unlimited).")
+            else:
+                await db.set_setting(db_key, str(val))
+                await update.effective_message.reply_html(f"✅ Plan <code>{edit_plan_key}</code> purchase limit updated successfully to <b>{val}</b>!")
+        else:
+            db_key = f"plan_price:{edit_plan_key}" if field == "amount" else f"plan_stars:{edit_plan_key}"
+            await db.set_setting(db_key, str(val))
+            field_label = "Price (₹)" if field == "amount" else "Stars count (⭐)"
+            await update.effective_message.reply_html(f"✅ Plan <code>{edit_plan_key}</code> key's <b>{field_label}</b> updated successfully to <b>{val}</b>!")
         
         # Show updated plan menu
         from handlers.callbacks import admin_edit_plan_select_callback

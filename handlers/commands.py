@@ -29,13 +29,53 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, mes
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    plans = await db.get_active_plans()
+    
+    def _get_plan_limit_highlight(plan_key: str, plans: dict) -> str:
+        p = plans.get(plan_key)
+        if not p:
+            return ""
+        lim = p.get("limit")
+        if lim is not None:
+            sold = p.get("sold_count", 0)
+            left = max(0, lim - sold)
+            if left <= 0:
+                return " 🔴 <b>(OUT OF STOCK)</b>"
+            else:
+                return f" 🔥 <b>(ONLY {left} LEFT!)</b>"
+        return ""
+        
+    direct_highlight = _get_plan_limit_highlight("direct", plans)
+    getpin_highlight = _get_plan_limit_highlight("getpin", plans)
+    donation_highlight = _get_plan_limit_highlight("donation", plans)
+    
+    faphouse_highlights = []
+    p1 = plans.get("faphouse_1", {})
+    if p1.get("limit") is not None:
+        left1 = max(0, p1["limit"] - p1.get("sold_count", 0))
+        faphouse_highlights.append(f"1D: {left1} left" if left1 > 0 else "1D: OUT")
+        
+    p3 = plans.get("faphouse_3", {})
+    if p3.get("limit") is not None:
+        left3 = max(0, p3["limit"] - p3.get("sold_count", 0))
+        faphouse_highlights.append(f"3D: {left3} left" if left3 > 0 else "3D: OUT")
+        
+    p7 = plans.get("faphouse_7", {})
+    if p7.get("limit") is not None:
+        left7 = max(0, p7["limit"] - p7.get("sold_count", 0))
+        faphouse_highlights.append(f"7D: {left7} left" if left7 > 0 else "7D: OUT")
+        
+    faphouse_str = ""
+    if faphouse_highlights:
+        faphouse_str = " 🔥 <b>(" + ", ".join(faphouse_highlights) + ")</b>"
+
     text = (
         "👑 <b>Welcome to Elite Premium Store!</b>\n\n"
         "Select a premium plan below to get instant access:\n\n"
-        "🎮 <b>Direct Mods</b> - Premium Apps\n"
-        "🚫 <b>No Getpin</b> - Remove getpin easily\n"
-        "🔥 <b>Faphouse Paid</b> - Exclusive content\n"
-        "❤️ <b>Test Donation</b> - Test payments\n\n"
+        f"🎮 <b>Direct Mods</b> - Premium Apps{direct_highlight}\n"
+        f"🚫 <b>No Getpin</b> - Remove getpin easily{getpin_highlight}\n"
+        f"🔥 <b>Faphouse Paid</b> - Exclusive content{faphouse_str}\n"
+        f"❤️ <b>Test Donation</b> - Test payments{donation_highlight}\n\n"
         "Use /plan or /pay to see pricing and purchase premium VIP access."
     )
     
@@ -88,11 +128,34 @@ async def plan_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, message_
     
     plans = await db.get_active_plans()
     for plan_key, plan in plans.items():
-        text += f"• <b>{plan['label']}</b>:\n"
+        is_maintenance = plan.get("status") == "maintenance"
+        lim = plan.get("limit")
+        is_out_of_stock = False
+        stock_text = ""
+        
+        if lim is not None:
+            left = max(0, lim - plan.get("sold_count", 0))
+            if left <= 0:
+                is_out_of_stock = True
+                stock_text = " 🔴 <b>(OUT OF STOCK)</b>"
+            else:
+                stock_text = f" 🔥 <b>(Only {left} left!)</b>"
+                
+        status_text = ""
+        if is_maintenance:
+            status_text = " 🛠 <i>(Under Maintenance)</i>"
+            
+        text += f"• <b>{plan['label']}</b>:{status_text}{stock_text}\n"
         text += f"  💰 Price: ₹{plan['amount']} / {plan['stars']} Stars ⭐\n\n"
         
         # Add buttons for each plan
-        keyboard.append([InlineKeyboardButton(f"✅ {plan['label']} (₹{plan['amount']})", callback_data=f"payplan:{plan_key}")])
+        btn_label = f"✅ {plan['label']} (₹{plan['amount']})"
+        if is_maintenance:
+            btn_label = f"🛠 {plan['label']} (Maintenance)"
+        elif is_out_of_stock:
+            btn_label = f"❌ {plan['label']} (Out of Stock)"
+            
+        keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"payplan:{plan_key}")])
         
     # Add back to main menu button
     keyboard.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_main")])

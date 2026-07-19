@@ -154,7 +154,8 @@ async def _notify_payment_admins(context: ContextTypes.DEFAULT_TYPE, req: dict, 
         if not aid:
             continue
         try:
-            await context.bot.send_message(chat_id=aid, text=note, reply_markup=kb, parse_mode="HTML")
+            msg = await context.bot.send_message(chat_id=aid, text=note, reply_markup=kb, parse_mode="HTML")
+            await db.add_admin_notification(req["id"], aid, msg.message_id)
         except Exception:
             pass
 
@@ -377,6 +378,17 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Invalid plan.")
         return
         
+    is_maintenance = plan.get("status") == "maintenance"
+    lim = plan.get("limit")
+    is_out_of_stock = (lim is not None) and (plan.get("sold_count", 0) >= lim)
+    
+    if is_maintenance:
+        await q.answer("⚠️ This plan is currently under maintenance. Please try again later.", show_alert=True)
+        return
+    if is_out_of_stock:
+        await q.answer("❌ Sorry, this plan is currently out of stock!", show_alert=True)
+        return
+        
     keyboard = [
         [
             InlineKeyboardButton("⚡ Fast Auto UPI (GPay, Paytm, PhonePe)", callback_data=f"paygwchoice:{plan_key}:razorpay")
@@ -503,16 +515,31 @@ async def pay_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         until = await _activate_payment_plan(db, req, context.bot, context)
         
         if req['plan_key'] == 'getpin':
-            await q.edit_message_text(
-                text=(
-                    f"✅ <b>Payment Approved (Getpin Plan)</b>\n\n"
-                    f"Request ID: #{rid}\n"
-                    f"User ID: {req['user_id']}\n"
-                    f"Approved By: {admin_name}\n"
-                    f"Status: <b>Awaiting User Screenshot</b>"
-                ),
-                parse_mode="HTML"
+            sync_text = (
+                f"✅ <b>Payment Approved (Getpin Plan)</b>\n\n"
+                f"Request ID: #{rid}\n"
+                f"User ID: {req['user_id']}\n"
+                f"Approved By: {admin_name}\n"
+                f"Status: <b>Awaiting User Screenshot</b>"
             )
+            await q.edit_message_text(text=sync_text, parse_mode="HTML")
+            
+            # Sync other admins
+            notifications = await db.list_admin_notifications(rid)
+            for n in notifications:
+                if n["admin_id"] == update.effective_chat.id:
+                    continue
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=n["admin_id"],
+                        message_id=n["message_id"],
+                        text=sync_text,
+                        reply_markup=None,
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
             await _delete_payment_qr_message(req, context)
             await _update_payment_user_status(
                 req,
@@ -543,16 +570,30 @@ async def pay_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception:
             pass
             
-        await q.edit_message_text(
-            text=(
-                f"✅ <b>Payment Approved</b>\n\n"
-                f"Request ID: #{rid}\n"
-                f"User ID: {req['user_id']}\n"
-                f"Plan: {req['plan_key']}\n"
-                f"Approved By: {admin_name}"
-            ),
-            parse_mode="HTML"
+        sync_text = (
+            f"✅ <b>Payment Approved</b>\n\n"
+            f"Request ID: #{rid}\n"
+            f"User ID: {req['user_id']}\n"
+            f"Plan: {req['plan_key']}\n"
+            f"Approved By: {admin_name}"
         )
+        await q.edit_message_text(text=sync_text, parse_mode="HTML")
+        
+        # Sync other admins
+        notifications = await db.list_admin_notifications(rid)
+        for n in notifications:
+            if n["admin_id"] == update.effective_chat.id:
+                continue
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=n["admin_id"],
+                    message_id=n["message_id"],
+                    text=sync_text,
+                    reply_markup=None,
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
         
         await _delete_payment_qr_message(req, context)
         await _update_payment_user_status(
@@ -586,16 +627,30 @@ async def pay_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception:
             pass
             
-        await q.edit_message_text(
-            text=(
-                f"❌ <b>Payment Rejected</b>\n\n"
-                f"Request ID: #{rid}\n"
-                f"User ID: {req['user_id']}\n"
-                f"Plan: {req['plan_key']}\n"
-                f"Rejected By: {admin_name}"
-            ),
-            parse_mode="HTML"
+        sync_text = (
+            f"❌ <b>Payment Rejected</b>\n\n"
+            f"Request ID: #{rid}\n"
+            f"User ID: {req['user_id']}\n"
+            f"Plan: {req['plan_key']}\n"
+            f"Rejected By: {admin_name}"
         )
+        await q.edit_message_text(text=sync_text, parse_mode="HTML")
+        
+        # Sync other admins
+        notifications = await db.list_admin_notifications(rid)
+        for n in notifications:
+            if n["admin_id"] == update.effective_chat.id:
+                continue
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=n["admin_id"],
+                    message_id=n["message_id"],
+                    text=sync_text,
+                    reply_markup=None,
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
         
         await _delete_payment_qr_message(req, context)
         await _update_payment_user_status(
@@ -1398,6 +1453,14 @@ async def pay_gw_choice_callback(update: Update, context: ContextTypes.DEFAULT_T
     if not plan:
         return
         
+    is_maintenance = plan.get("status") == "maintenance"
+    lim = plan.get("limit")
+    is_out_of_stock = (lim is not None) and (plan.get("sold_count", 0) >= lim)
+    
+    if is_maintenance or is_out_of_stock:
+        await q.answer("⚠️ This plan is currently unavailable (Maintenance or Out of Stock).", show_alert=True)
+        return
+        
     # Delete selection message to keep chat clean
     try:
         await q.message.delete()
@@ -1775,15 +1838,23 @@ async def admin_edit_plans_menu_callback(update: Update, context: ContextTypes.D
     plans = await db.get_active_plans()
     
     text = (
-        "🏷 <b>Edit Product/Plan Prices & Stars</b>\n\n"
-        "Niche diye gaye plans me se kisi ek ko select karein jiska price ya stars aap change karna chahte hain:"
+        "🏷 <b>Edit Product/Plan Prices, Limits & Status</b>\n\n"
+        "Niche diye gaye plans me se kisi ek ko select karein jise aap customize karna chahte hain:"
     )
     
     keyboard = []
     for plan_key, plan in plans.items():
+        is_m = plan.get("status") == "maintenance"
+        lim = plan.get("limit")
+        lbl = f"📝 {plan['label']} (₹{plan['amount']} / {plan.get('stars', plan['amount'])} ⭐)"
+        if is_m:
+            lbl += " 🛠[Maint]"
+        if lim is not None:
+            lbl += f" 📦[Lim: {lim}]"
+            
         keyboard.append([
             InlineKeyboardButton(
-                f"📝 {plan['label']} (₹{plan['amount']} / {plan.get('stars', plan['amount'])} ⭐)",
+                lbl,
                 callback_data=f"admin_edit_plan_select:{plan_key}"
             )
         ])
@@ -1814,18 +1885,30 @@ async def admin_edit_plan_select_callback(update: Update, context: ContextTypes.
         await q.answer("Plan not found", show_alert=True)
         return
         
+    status = plan.get("status", "active")
+    status_label = "🟢 Active" if status == "active" else "🛠 Under Maintenance"
+    limit_val = plan.get("limit")
+    limit_label = f"{limit_val} (Sold: {plan.get('sold_count', 0)})" if limit_val is not None else "None (Unlimited)"
+    
     text = (
         f"⚙️ <b>Modify Plan: {plan['label']}</b>\n\n"
         f"• <b>Plan Key:</b> <code>{plan_key}</code>\n"
         f"• <b>Current Price:</b> ₹{plan['amount']}\n"
-        f"• <b>Current Stars:</b> {plan.get('stars', plan['amount'])} Stars ⭐\n\n"
+        f"• <b>Current Stars:</b> {plan.get('stars', plan['amount'])} Stars ⭐\n"
+        f"• <b>Current Status:</b> {status_label}\n"
+        f"• <b>Purchase Limit:</b> <code>{limit_label}</code>\n\n"
         "Aap is plan ke liye kya update karna chahte hain?"
     )
     
+    toggle_label = "🔴 Disable (Maintenance)" if status == "active" else "🟢 Enable (Resume)"
     keyboard = [
         [
             InlineKeyboardButton("Change Price (₹)", callback_data=f"admin_edit_plan_field:{plan_key}:amount"),
             InlineKeyboardButton("Change Stars (⭐)", callback_data=f"admin_edit_plan_field:{plan_key}:stars")
+        ],
+        [
+            InlineKeyboardButton("Set Limit", callback_data=f"admin_edit_plan_field:{plan_key}:limit"),
+            InlineKeyboardButton(toggle_label, callback_data=f"admin_edit_plan_toggle_status:{plan_key}")
         ],
         [
             InlineKeyboardButton("🔙 Back to Plans List", callback_data="admin_edit_plans_menu")
@@ -1848,26 +1931,64 @@ async def admin_edit_plan_field_callback(update: Update, context: ContextTypes.D
     data = q.data or ""
     parts = data.split(":")
     plan_key = parts[1]
-    field = parts[2] # "amount" or "stars"
+    field = parts[2] # "amount" or "stars" or "limit"
     
     context.user_data["edit_plan_key"] = plan_key
     context.user_data["edit_plan_field"] = field
     context.user_data["edit_plan_msg_id"] = q.message.message_id
     
-    field_label = "Price in Rupees (₹)" if field == "amount" else "Stars count (⭐)"
-    
-    text = (
-        f"✍️ <b>Update Plan:</b> <code>{plan_key}</code>\n\n"
-        f"Please enter the new value for <b>{field_label}</b>:\n"
-        f"• Send a positive number (e.g. <code>50</code>)\n"
-        f"• Cancel karne ke liye type karein: <code>cancel</code>"
-    )
+    if field == "limit":
+        field_label = "Purchase Limit"
+        text = (
+            f"✍️ <b>Update Plan:</b> <code>{plan_key}</code>\n\n"
+            f"Please enter the new value for <b>{field_label}</b>:\n"
+            f"• Send a positive number (e.g. <code>100</code>)\n"
+            f"• Send <code>none</code> or <code>unlimited</code> to remove limit\n"
+            f"• Cancel karne ke liye type karein: <code>cancel</code>"
+        )
+    else:
+        field_label = "Price in Rupees (₹)" if field == "amount" else "Stars count (⭐)"
+        text = (
+            f"✍️ <b>Update Plan:</b> <code>{plan_key}</code>\n\n"
+            f"Please enter the new value for <b>{field_label}</b>:\n"
+            f"• Send a positive number (e.g. <code>50</code>)\n"
+            f"• Cancel karne ke liye type karein: <code>cancel</code>"
+        )
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=text,
         parse_mode="HTML"
     )
+
+async def admin_edit_plan_toggle_status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    data = q.data or ""
+    plan_key = data.split(":")[1]
+    
+    plans = await db.get_active_plans()
+    plan = plans.get(plan_key)
+    if not plan:
+        await q.answer("Plan not found", show_alert=True)
+        return
+        
+    current_status = plan.get("status", "active")
+    new_status = "maintenance" if current_status == "active" else "active"
+    
+    await db.set_setting(f"plan_status:{plan_key}", new_status)
+    await q.answer(f"Plan status updated to: {new_status.upper()}", show_alert=True)
+    
+    # Reload details menu by modifying callback data
+    q.data = f"admin_edit_plan_select:{plan_key}"
+    await admin_edit_plan_select_callback(update, context)
 
 
 

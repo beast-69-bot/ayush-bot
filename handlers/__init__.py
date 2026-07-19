@@ -20,7 +20,8 @@ from handlers.callbacks import (
     pay_gw_choice_callback, back_plans_callback,
     admin_withdraw_menu_callback, admin_withdraw_req_prompt_callback, withdraw_done_callback,
     admin_group_menu_callback, admin_connect_group_callback,
-    admin_edit_plans_menu_callback, admin_edit_plan_select_callback, admin_edit_plan_field_callback
+    admin_edit_plans_menu_callback, admin_edit_plan_select_callback, admin_edit_plan_field_callback,
+    admin_edit_plan_toggle_status_callback
 )
 from handlers.messages import handle_incoming_messages
 
@@ -76,6 +77,7 @@ def register_all_handlers(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(admin_edit_plans_menu_callback, pattern=r"^admin_edit_plans_menu$"))
     app.add_handler(CallbackQueryHandler(admin_edit_plan_select_callback, pattern=r"^admin_edit_plan_select:"))
     app.add_handler(CallbackQueryHandler(admin_edit_plan_field_callback, pattern=r"^admin_edit_plan_field:"))
+    app.add_handler(CallbackQueryHandler(admin_edit_plan_toggle_status_callback, pattern=r"^admin_edit_plan_toggle_status:"))
     
     # Donation & Gateway Choice handlers
     app.add_handler(CallbackQueryHandler(pay_gw_choice_callback, pattern=r"^paygwchoice:"))

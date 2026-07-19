@@ -113,6 +113,14 @@ class Database:
               key           TEXT,
               expiry        REAL
             );
+
+            CREATE TABLE IF NOT EXISTS admin_notifications (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              request_id    INTEGER NOT NULL,
+              admin_id      INTEGER NOT NULL,
+              message_id    INTEGER NOT NULL,
+              created_at    INTEGER NOT NULL
+            );
             """
         )
         await self.conn.commit()
@@ -727,7 +735,50 @@ class Database:
                     plan_copy["stars"] = int(stars_override)
                 except ValueError:
                     pass
-                    
+
+            # Check status override
+            status_override = await self.get_setting(f"plan_status:{plan_key}")
+            plan_copy["status"] = status_override or "active"
+
+            # Check limit override
+            limit_override = await self.get_setting(f"plan_limit:{plan_key}")
+            if limit_override is not None:
+                try:
+                    plan_copy["limit"] = int(limit_override)
+                except ValueError:
+                    plan_copy["limit"] = None
+            else:
+                plan_copy["limit"] = None
+                
+            # Populate sold count
+            plan_copy["sold_count"] = await self.get_plan_sales_count(plan_key)
+            
             plans[plan_key] = plan_copy
         return plans
+
+    async def add_admin_notification(self, request_id: int, admin_id: int, message_id: int) -> None:
+        now = _now()
+        await self.conn.execute(
+            "INSERT INTO admin_notifications(request_id, admin_id, message_id, created_at) VALUES(?, ?, ?, ?)",
+            (int(request_id), int(admin_id), int(message_id), now)
+        )
+        await self.conn.commit()
+
+    async def list_admin_notifications(self, request_id: int) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            "SELECT admin_id, message_id FROM admin_notifications WHERE request_id=?",
+            (int(request_id),)
+        )
+        rows = await cur.fetchall()
+        await cur.close()
+        return [{"admin_id": r[0], "message_id": r[1]} for r in rows]
+
+    async def get_plan_sales_count(self, plan_key: str) -> int:
+        cur = await self.conn.execute(
+            "SELECT COUNT(*) FROM payment_requests WHERE plan_key=? AND status='processed'",
+            (plan_key,)
+        )
+        row = await cur.fetchone()
+        await cur.close()
+        return row[0] if row else 0
 
