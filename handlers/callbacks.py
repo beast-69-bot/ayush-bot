@@ -1295,9 +1295,10 @@ async def admin_revenue_menu_callback(update: Update, context: ContextTypes.DEFA
         label = plan.get("label", pk)
         text += f"• {label}: ₹{rev}\n"
         
-    keyboard = [[
-        InlineKeyboardButton("🔙 Back to Admin Menu", callback_data="back_admin_main")
-    ]]
+    keyboard = [
+        [InlineKeyboardButton("📅 Daily Revenue Breakdown", callback_data="admin_daily_revenue")],
+        [InlineKeyboardButton("🔙 Back to Admin Menu", callback_data="back_admin_main")]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await q.edit_message_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
 
@@ -1776,8 +1777,8 @@ async def withdraw_done_callback(update: Update, context: ContextTypes.DEFAULT_T
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     
-    # Must be admin to process withdrawal
-    if not await db.is_admin(user_id):
+    # Must be Razorpay owner, Bot owner, or Admin to process withdrawal
+    if user_id != config.RAZORPAY_OWNER_ID and user_id != config.OWNER_ID and not await db.is_admin(user_id):
         await q.answer("Access denied", show_alert=True)
         return
         
@@ -1789,8 +1790,8 @@ async def withdraw_done_callback(update: Update, context: ContextTypes.DEFAULT_T
         await q.answer("Request not found", show_alert=True)
         return
         
-    if req["status"] == "approved":
-        await q.answer("Already processed", show_alert=True)
+    if req["status"] in ("approved", "rejected"):
+        await q.answer(f"Already {req['status']}", show_alert=True)
         return
         
     ok = await db.approve_withdrawal_request(wid, user_id)
@@ -1824,6 +1825,108 @@ async def withdraw_done_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
     except Exception:
         pass
+
+async def withdraw_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    
+    # Must be Razorpay owner, Bot owner, or Admin to process withdrawal
+    if user_id != config.RAZORPAY_OWNER_ID and user_id != config.OWNER_ID and not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    data = q.data or ""
+    wid = int(data.split(":")[1])
+    
+    req = await db.get_withdrawal_request(wid)
+    if not req:
+        await q.answer("Request not found", show_alert=True)
+        return
+        
+    if req["status"] in ("approved", "rejected"):
+        await q.answer(f"Already {req['status']}", show_alert=True)
+        return
+        
+    ok = await db.reject_withdrawal_request(wid, user_id)
+    if not ok:
+        await q.answer("Failed to reject", show_alert=True)
+        return
+        
+    admin_name = f"@{update.effective_user.username}" if update.effective_user.username else str(user_id)
+    
+    # Update owner's message
+    text = (
+        "❌ <b>Withdrawal Request Rejected</b>\n\n"
+        f"Request ID: #{wid}\n"
+        f"Amount: ₹{req['amount']}\n"
+        f"Requester: <code>{req['requester_id']}</code>\n"
+        f"Rejected By: {admin_name}"
+    )
+    await q.edit_message_text(text=text, parse_mode="HTML")
+    
+    # Notify the requester
+    try:
+        await context.bot.send_message(
+            chat_id=req["requester_id"],
+            text=(
+                f"❌ <b>Withdrawal Request Rejected</b>\n\n"
+                f"💸 Amount: ₹{req['amount']}\n"
+                f"🆔 Request ID: #{wid}\n"
+                f"👮 Rejected By: {admin_name}\n\n"
+                "The requested amount has been returned to the available balance."
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+async def admin_daily_revenue_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        await q.answer("Access denied", show_alert=True)
+        return
+        
+    daily = await db.get_daily_revenue_breakdown()
+    
+    if not daily:
+        text = (
+            "📅 <b>Daily Revenue Breakdown Report</b>\n\n"
+            "⚠️ <i>No sales/revenue data recorded yet.</i>"
+        )
+    else:
+        text = "📅 <b>Daily Revenue Breakdown Report</b>\n\n"
+        total_all_fiat = 0
+        total_all_stars = 0
+        
+        for date_str, stats in list(daily.items())[:15]:
+            total_all_fiat += stats['total_rs']
+            total_all_stars += stats['stars']
+            
+            text += (
+                f"🗓 <b>{date_str}</b> ({stats['count']} orders):\n"
+                f"  💰 Total: <b>₹{stats['total_rs']}</b> / <b>{stats['stars']} Stars ⭐</b>\n"
+                f"  ├─ 💳 Manual UPI: ₹{stats['manual']}\n"
+                f"  ├─ ⚡ Razorpay: ₹{stats['razorpay']}\n"
+                f"  └─ ⭐ Stars: {stats['stars']} Stars\n\n"
+            )
+            
+        text += (
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 <b>Total Sales (Period):</b> ₹{total_all_fiat} | {total_all_stars} Stars ⭐"
+        )
+        
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Back to Revenue Menu", callback_data="admin_revenue_menu")]
+    ])
+    
+    await q.edit_message_text(text=text, reply_markup=kb, parse_mode="HTML")
 
 async def admin_edit_plans_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query

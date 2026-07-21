@@ -225,7 +225,10 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
         
         # Send message to owner
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Mark Done", callback_data=f"withdraw_done:{wid}")]
+            [
+                InlineKeyboardButton("✅ Approve / Done", callback_data=f"withdraw_done:{wid}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"withdraw_reject:{wid}")
+            ]
         ])
         
         requester_name = f"@{update.effective_user.username}" if update.effective_user.username else str(user_id)
@@ -234,7 +237,7 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
             f"🆔 Request ID: #{wid}\n"
             f"👤 Requester: {requester_name} (ID: <code>{user_id}</code>)\n"
             f"💰 Amount: <b>₹{amount}</b>\n\n"
-            "Click the button below once you have processed/transferred the money:"
+            "Please approve or reject the request using the buttons below:"
         )
         
         sent_to_owner = False

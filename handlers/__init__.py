@@ -6,7 +6,7 @@ from telegram.ext import (
     PreCheckoutQueryHandler,
     filters
 )
-from handlers.commands import start, plan_menu, make_admin, details, pay_lookup, cmd_settings, admin_menu_cmd
+from handlers.commands import start, plan_menu, make_admin, details, pay_lookup, cmd_settings, admin_menu_cmd, daily_revenue_cmd
 from handlers.callbacks import (
     pay_callback, pay_cancel_callback, pay_utr_callback, pay_admin_callback,
     my_orders_callback, settings_gw_callback, settings_field_callback,
@@ -18,10 +18,10 @@ from handlers.callbacks import (
     admin_revenue_menu_callback, admin_broadcast_menu_callback, broadcast_confirm_callback,
     back_admin_main_callback, admin_close_callback, admin_action_callback,
     pay_gw_choice_callback, back_plans_callback,
-    admin_withdraw_menu_callback, admin_withdraw_req_prompt_callback, withdraw_done_callback,
+    admin_withdraw_menu_callback, admin_withdraw_req_prompt_callback, withdraw_done_callback, withdraw_reject_callback,
     admin_group_menu_callback, admin_connect_group_callback,
     admin_edit_plans_menu_callback, admin_edit_plan_select_callback, admin_edit_plan_field_callback,
-    admin_edit_plan_toggle_status_callback
+    admin_edit_plan_toggle_status_callback, admin_daily_revenue_callback
 )
 from handlers.messages import handle_incoming_messages
 
@@ -36,6 +36,8 @@ def register_all_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("settings", cmd_settings))
     app.add_handler(CommandHandler("setpay", cmd_settings))
     app.add_handler(CommandHandler("admin", admin_menu_cmd))
+    app.add_handler(CommandHandler("dailyrevenue", daily_revenue_cmd))
+    app.add_handler(CommandHandler("daily", daily_revenue_cmd))
 
     # 2. Callback Query Handlers
     app.add_handler(CallbackQueryHandler(info_screens_callback, pattern=r"^info_"))
@@ -58,6 +60,7 @@ def register_all_handlers(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(admin_orders_menu_callback, pattern=r"^admin_orders_menu$"))
     app.add_handler(CallbackQueryHandler(admin_view_order_callback, pattern=r"^admin_view_order:"))
     app.add_handler(CallbackQueryHandler(admin_revenue_menu_callback, pattern=r"^admin_revenue_menu$"))
+    app.add_handler(CallbackQueryHandler(admin_daily_revenue_callback, pattern=r"^admin_daily_revenue$"))
     app.add_handler(CallbackQueryHandler(admin_broadcast_menu_callback, pattern=r"^admin_broadcast_menu$"))
     app.add_handler(CallbackQueryHandler(broadcast_confirm_callback, pattern=r"^broadcast_confirm:"))
     app.add_handler(CallbackQueryHandler(back_admin_main_callback, pattern=r"^back_admin_main$"))
@@ -68,6 +71,7 @@ def register_all_handlers(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(admin_withdraw_menu_callback, pattern=r"^admin_withdraw_menu$"))
     app.add_handler(CallbackQueryHandler(admin_withdraw_req_prompt_callback, pattern=r"^admin_withdraw_req_prompt$"))
     app.add_handler(CallbackQueryHandler(withdraw_done_callback, pattern=r"^withdraw_done:"))
+    app.add_handler(CallbackQueryHandler(withdraw_reject_callback, pattern=r"^withdraw_reject:"))
     
     # Group Connect callbacks
     app.add_handler(CallbackQueryHandler(admin_group_menu_callback, pattern=r"^admin_group_menu$"))

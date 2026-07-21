@@ -424,3 +424,24 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, me
             parse_mode="HTML"
         )
 
+async def daily_revenue_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await db.is_admin(user_id):
+        return
+        
+    from handlers.callbacks import admin_daily_revenue_callback
+    class FakeQuery:
+        def __init__(self, msg):
+            self.data = "admin_daily_revenue"
+            self.message = msg
+        async def answer(self, *args, **kwargs):
+            pass
+        async def edit_message_text(self, *args, **kwargs):
+            await update.effective_message.reply_html(kwargs.get("text", ""), reply_markup=kwargs.get("reply_markup"))
+            
+    fake_update = Update(update.update_id)
+    fake_update._effective_chat = update.effective_chat
+    fake_update._effective_user = update.effective_user
+    fake_update.callback_query = FakeQuery(update.effective_message)
+    await admin_daily_revenue_callback(fake_update, context)

@@ -701,6 +701,19 @@ class Database:
         await self.conn.commit()
         return bool(cur.rowcount and cur.rowcount > 0)
 
+    async def reject_withdrawal_request(self, wid: int, processed_by: int) -> bool:
+        now = _now()
+        cur = await self.conn.execute(
+            """
+            UPDATE withdrawals
+            SET status='rejected', processed_by=?, updated_at=?
+            WHERE id=? AND status='pending'
+            """,
+            (int(processed_by), now, int(wid))
+        )
+        await self.conn.commit()
+        return bool(cur.rowcount and cur.rowcount > 0)
+
     async def get_total_withdrawn(self) -> int:
         cur = await self.conn.execute(
             """
@@ -712,6 +725,61 @@ class Database:
         row = await cur.fetchone()
         await cur.close()
         return int(row[0]) if row and row[0] is not None else 0
+
+    async def get_daily_revenue_breakdown(self) -> dict[str, dict[str, Any]]:
+        import json
+        import datetime
+        cur = await self.conn.execute(
+            """
+            SELECT amount_rs, processed_at, gateway_extra
+            FROM payment_requests
+            WHERE status='processed'
+            ORDER BY processed_at DESC
+            """
+        )
+        rows = await cur.fetchall()
+        await cur.close()
+        
+        daily: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            amount_rs = int(row[0])
+            processed_at = row[1]
+            gateway_extra_str = row[2]
+            
+            gw = "manual"
+            if gateway_extra_str:
+                try:
+                    gw_extra = json.loads(gateway_extra_str)
+                    gw = gw_extra.get("gateway", "manual")
+                except Exception:
+                    if "razorpay" in str(gateway_extra_str).lower():
+                        gw = "razorpay"
+                    elif "stars" in str(gateway_extra_str).lower():
+                        gw = "stars"
+                        
+            date_str = datetime.datetime.utcfromtimestamp(processed_at).strftime("%Y-%m-%d")
+            
+            if date_str not in daily:
+                daily[date_str] = {
+                    "date": date_str,
+                    "total_rs": 0,
+                    "manual": 0,
+                    "razorpay": 0,
+                    "stars": 0,
+                    "count": 0
+                }
+                
+            daily[date_str]["count"] += 1
+            if gw == "stars":
+                daily[date_str]["stars"] += amount_rs
+            elif gw == "razorpay":
+                daily[date_str]["razorpay"] += amount_rs
+                daily[date_str]["total_rs"] += amount_rs
+            else:
+                daily[date_str]["manual"] += amount_rs
+                daily[date_str]["total_rs"] += amount_rs
+                
+        return daily
 
     async def get_active_plans(self) -> dict[str, Any]:
         import config
